@@ -1,0 +1,94 @@
+# ── Secrets & environment ─────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+
+# ── Project specification (not for source control) ────────────────
+project-features.md
+
+# ── Python ───────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+*.pdb
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+parts/
+var/
+sdist/
+develop-eggs/
+.installed.cfg
+lib/
+lib64/
+
+# ── Virtual environment ───────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+
+# ── Testing & coverage ───────────────────────────────────────────
+.pytest_cache/
+pytest_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+*.coveragerc
+.tox/
+
+# ── Type checking ─────────────────────────────────────────────────
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyright/
+.ruff_cache/
+
+# ── IDEs & editors ────────────────────────────────────────────────
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+*.swp
+*.swo
+*~
+
+# ── OS files ──────────────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# ── Temporary / processing files ─────────────────────────────────
+tmp/
+temp/
+*.tmp
+*.temp
+
+# ── Logs ──────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── Data files (never commit raw/processed datasets) ─────────────
+*.csv
+*.parquet
+*.json.bak
+sessions/
+
+# ── Distribution / packaging ──────────────────────────────────────
+*.manifest
+*.spec
+pip-log.txt
+pip-delete-this-directory.txt
