@@ -5,6 +5,7 @@ pydantic==2.13.5
 pydantic-settings==2.15.0
 python-dotenv==1.2.3
 aiofiles==25.1.0
+python-multipart==0.0.20  # Required for FastAPI UploadFile / Form
 
 # ── Phase 2+: Supabase ────────────────────────────────────────────
 supabase==2.15.2

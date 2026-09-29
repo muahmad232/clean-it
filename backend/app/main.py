@@ -11,6 +11,12 @@ Phase 2 additions:
   - Supabase DB connectivity check on startup
   - Supabase Storage bucket verification on startup
   - DB status reflected in /health response
+
+Phase 3 additions:
+  - POST /api/v1/projects/{project_id}/datasets/upload
+  - GET  /api/v1/projects/{project_id}/datasets
+  - GET  /api/v1/projects/{project_id}/datasets/{dataset_id}
+  - GET  /api/v1/limits
 """
 
 from contextlib import asynccontextmanager
@@ -117,6 +123,11 @@ def create_app() -> FastAPI:
 
 def _register_routes(app: FastAPI) -> None:
     """Register all routers. Add new routers here as phases progress."""
+
+    # Phase 3: Dataset upload
+    from app.routers.upload import router as upload_router, limits_router
+    app.include_router(upload_router)
+    app.include_router(limits_router)
 
     @app.get(
         "/health",
