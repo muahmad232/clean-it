@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     supabase_url: str = Field(default="")
     supabase_anon_key: str = Field(default="")
     supabase_service_role_key: str = Field(default="")
+    supabase_db_url: str = Field(default="")  # postgresql://postgres:[pw]@db.[ref].supabase.co:5432/postgres
 
     # ── Resource Limits ───────────────────────────────────────────
     max_upload_size_mb: int = Field(default=100)

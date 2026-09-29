@@ -6,7 +6,11 @@ Phase 1 — Minimal backend:
   - CORS configuration
   - Global exception handlers
   - Health endpoint
-  - No business logic yet
+
+Phase 2 additions:
+  - Supabase DB connectivity check on startup
+  - Supabase Storage bucket verification on startup
+  - DB status reflected in /health response
 """
 
 from contextlib import asynccontextmanager
@@ -35,6 +39,26 @@ async def lifespan(app: FastAPI):
         f"version={settings.app_version} | "
         f"env={settings.environment}"
     )
+
+    # ── Phase 2: verify Supabase connectivity ─────────────────────
+    if settings.supabase_url and settings.supabase_service_role_key:
+        try:
+            from app.storage.supabase import ensure_bucket_exists
+            from app.database.client import get_service_client
+
+            # DB ping: list tables in data_agent schema
+            client = get_service_client()
+            client.schema("data_agent").table("projects").select("id").limit(1).execute()
+            logger.info("Supabase DB connection ✓")
+
+            # Storage: ensure datasets bucket exists
+            ensure_bucket_exists()
+        except Exception as exc:
+            logger.error(f"Supabase connectivity check failed: {exc}")
+            # Don't crash the server — ops can fix credentials at runtime
+    else:
+        logger.warning("Supabase credentials not set — skipping connectivity check")
+
     yield
     logger.info("Shutting down Agentic Data Pipeline API")
 
@@ -106,12 +130,25 @@ def _register_routes(app: FastAPI) -> None:
 
         Returns HTTP 200 when the service is operational.
         Suitable for use as a Render/Kubernetes liveness probe.
+        Includes a live Supabase DB ping so infra issues surface immediately.
         """
         settings = get_settings()
+
+        db_status = "unconfigured"
+        if settings.supabase_url and settings.supabase_service_role_key:
+            try:
+                from app.database.client import get_service_client
+                client = get_service_client()
+                client.schema("data_agent").table("projects").select("id").limit(1).execute()
+                db_status = "ok"
+            except Exception as exc:
+                db_status = f"error: {exc}"
+
         return {
             "status": "healthy",
             "version": settings.app_version,
             "environment": settings.environment,
+            "db_status": db_status,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
