@@ -3,6 +3,19 @@ import { createClient } from '@supabase/supabase-js'
 let supabaseInstance = null
 let initPromise = null
 
+export function syncAuthSession(session) {
+  if (session?.user?.id) {
+    localStorage.setItem('cleanit_user_id', session.user.id)
+  } else {
+    localStorage.removeItem('cleanit_user_id')
+  }
+  if (session?.access_token) {
+    localStorage.setItem('cleanit_access_token', session.access_token)
+  } else {
+    localStorage.removeItem('cleanit_access_token')
+  }
+}
+
 /**
  * Initializes and returns the Supabase client instance.
  * Automatically fetches the public project URL and anon key from backend or env.
@@ -41,6 +54,14 @@ export async function getSupabase() {
         autoRefreshToken: true,
         detectSessionInUrl: true,
       },
+    })
+
+    // Auto-sync session tokens
+    supabaseInstance.auth.onAuthStateChange((_event, session) => {
+      syncAuthSession(session)
+    })
+    supabaseInstance.auth.getSession().then(({ data }) => {
+      if (data?.session) syncAuthSession(data.session)
     })
 
     return supabaseInstance

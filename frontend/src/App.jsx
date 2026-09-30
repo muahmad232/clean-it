@@ -8,6 +8,7 @@ import InfoPage from './pages/InfoPage'
 import AuthModal from './components/AuthModal'
 import {
   getOrCreateDefaultProject,
+  fetchProjects,
   uploadDatasetFile,
   triggerDatasetProfile,
   fetchDatasetIssues
@@ -19,6 +20,7 @@ export default function App() {
   const [user, setUser] = useState(null)
   const [isAuthOpen, setIsAuthOpen] = useState(false)
   const [project, setProject] = useState(null)
+  const [projects, setProjects] = useState([])
   const [isUploading, setIsUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState('')
   const [activeDataset, setActiveDataset] = useState(null)
@@ -59,16 +61,30 @@ export default function App() {
     initAuth()
   }, [])
 
+  const refreshProjectsList = async () => {
+    try {
+      const list = await fetchProjects()
+      setProjects(list)
+      return list
+    } catch {
+      return []
+    }
+  }
+
   // 2. Initialize project container
   useEffect(() => {
     async function initProject() {
       const proj = await getOrCreateDefaultProject()
       setProject(proj)
+      const list = await refreshProjectsList()
+      if (proj && !list.some(p => p.id === proj.id)) {
+        setProjects(prev => [proj, ...prev])
+      }
     }
     initProject()
   }, [user])
 
-  const handleUploadAndProfile = async (file, taskType = 'GENERAL') => {
+  const handleUploadAndProfile = async (file, taskType = 'GENERAL', targetProjectId = null) => {
     setIsUploading(true)
     setError(null)
     setUploadProgress(`Connecting workspace...`)
@@ -77,7 +93,13 @@ export default function App() {
     setActiveTab('studio')
 
     try {
-      let currentProject = project
+      let currentProject = null
+      if (targetProjectId) {
+        currentProject = projects.find(p => p.id === targetProjectId) || { id: targetProjectId }
+      } else {
+        currentProject = project
+      }
+
       if (!currentProject || !currentProject.id || currentProject.id === '00000000-0000-0000-0000-000000000001') {
         currentProject = await getOrCreateDefaultProject()
         setProject(currentProject)
@@ -103,6 +125,7 @@ export default function App() {
       setIssuesData(issuesResult.issues || [])
 
       setUploadProgress('')
+      refreshProjectsList()
     } catch (err) {
       console.error(err)
       setError(err.message || 'An error occurred during dataset processing.')
@@ -114,6 +137,10 @@ export default function App() {
   const handleOpenExistingDataset = async (dataset) => {
     setActiveDataset(dataset)
     setProfileData(dataset.profile_json || null)
+    if (dataset.project_id) {
+      const proj = projects.find(p => p.id === dataset.project_id)
+      if (proj) setProject(proj)
+    }
     setActiveTab('studio')
 
     // Fetch fresh issues if available
@@ -130,6 +157,13 @@ export default function App() {
     setProfileData(null)
     setIssuesData([])
     setError(null)
+  }
+
+  const handleDatasetCleaned = (cleanedResult) => {
+    if (cleanedResult?.final_profile) {
+      setProfileData(cleanedResult.final_profile)
+      setIssuesData(cleanedResult.final_profile.issues || [])
+    }
   }
 
   const handleSignOut = async () => {
@@ -161,6 +195,9 @@ export default function App() {
         {activeTab === 'studio' && (
           <StudioPage
             project={project}
+            projects={projects}
+            onSelectProject={setProject}
+            onRefreshProjects={refreshProjectsList}
             activeDataset={activeDataset}
             profileData={profileData}
             issuesData={issuesData}
@@ -172,6 +209,7 @@ export default function App() {
             onUploadAndProfile={handleUploadAndProfile}
             onReset={handleReset}
             onErrorDismiss={() => setError(null)}
+            onDatasetCleaned={handleDatasetCleaned}
           />
         )}
 
@@ -181,6 +219,11 @@ export default function App() {
             onOpenAuth={() => setIsAuthOpen(true)}
             onOpenDatasetInStudio={handleOpenExistingDataset}
             onNavigate={setActiveTab}
+            onSelectProjectForUpload={(proj) => {
+              setProject(proj)
+              setActiveTab('studio')
+            }}
+            onRefreshProjects={refreshProjectsList}
           />
         )}
 

@@ -22,6 +22,7 @@ from app.core.logging import get_logger
 from app.database.client import get_service_client
 from app.database.repositories.datasets import get_dataset, get_project, update_dataset_profile
 from app.services.cleaner import clean_dataset
+from app.services.agent_cleaner import run_agentic_cleaning_cycle
 from app.storage.supabase import download_file, upload_file
 
 logger = get_logger(__name__)
@@ -153,6 +154,152 @@ def clean_direct_dataset(
         task_type=task_type,
         target_column=target_column,
     )
+
+
+@router.post(
+    "/api/v1/projects/{project_id}/datasets/{dataset_id}/agent-clean",
+    summary="Autonomous multi-step agentic cleaning loop",
+    status_code=status.HTTP_200_OK,
+)
+def clean_project_dataset_agentic(
+    project_id: str,
+    dataset_id: str,
+    task_type: Optional[str] = Query(default=None, description="Task type override (CLASSIFICATION, REGRESSION, etc.)"),
+    target_column: Optional[str] = Query(default=None, description="Target column to protect"),
+    max_iterations: int = Query(default=3, ge=1, le=5, description="Maximum agentic iteration cycles"),
+):
+    """
+    Execute an autonomous multi-step cleaning loop:
+    1. Profile dataset state.
+    2. LLM diagnoses defects and selects precise cleaning functions.
+    3. Polars executes the functions deterministically.
+    4. Dataset is re-profiled and re-analyzed.
+    5. Repeats until clean or max_iterations reached.
+    """
+    project = get_project(project_id)
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "project_not_found", "message": f"Project '{project_id}' not found."},
+        )
+
+    dataset = get_dataset(dataset_id)
+    if not dataset or dataset.get("project_id") != project_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "dataset_not_found", "message": f"Dataset '{dataset_id}' not found."},
+        )
+
+    storage_path = dataset.get("storage_path")
+    if not storage_path:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"error": "no_file", "message": "Dataset has not been uploaded yet."},
+        )
+
+    # 1. Download file bytes
+    try:
+        raw_bytes = download_file(storage_path)
+    except Exception as exc:
+        logger.error(f"Failed downloading file from storage: {exc}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"error": "storage_error", "message": f"Could not retrieve dataset file: {exc}"},
+        )
+
+    effective_task = task_type or dataset.get("task_type", "GENERAL")
+    effective_target = target_column if target_column is not None else dataset.get("target_column")
+    file_type = dataset.get("file_type", "csv")
+
+    # 2. Run Autonomous Agentic Cleaning Loop
+    try:
+        run_result = run_agentic_cleaning_cycle(
+            dataset_id=dataset_id,
+            file_bytes=raw_bytes,
+            file_type=file_type,
+            task_type=effective_task,
+            target_column=effective_target,
+            max_iterations=max_iterations,
+        )
+    except Exception as exc:
+        logger.exception(f"Agent cleaning cycle failed on dataset {dataset_id}: {exc}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"error": "agent_cleaning_failed", "message": f"Agent cleaning loop failed: {exc}"},
+        )
+
+    cleaned_bytes = run_result.pop("cleaned_bytes")
+    final_profile = run_result.pop("final_profile")
+
+    # 3. Upload final cleaned CSV to storage
+    cleaned_path = f"datasets/cleaned/{project_id}/{dataset_id}/cleaned_{dataset.get('original_filename', 'data.csv')}"
+    try:
+        upload_file(cleaned_path, cleaned_bytes, content_type="text/csv")
+    except Exception as exc:
+        logger.warning(f"Could not upload cleaned file to Supabase storage ({exc}); proceeding with report.")
+
+    # 4. Update dataset profile and status
+    profile_json = dataset.get("profile_json") or {}
+    profile_json["agent_cleaning_report"] = run_result
+    profile_json["cleaned_storage_path"] = cleaned_path
+    # Also update main profile to reflect the newly cleaned dataset state!
+    profile_json["shape"] = final_profile.get("shape", profile_json.get("shape"))
+    profile_json["total_null_pct"] = final_profile.get("total_null_pct", 0.0)
+    profile_json["duplicate_row_count"] = final_profile.get("duplicate_row_count", 0)
+    profile_json["columns"] = final_profile.get("columns", profile_json.get("columns"))
+    profile_json["issues"] = final_profile.get("issues", [])
+    profile_json["llm_summary"] = final_profile.get("llm_summary", profile_json.get("llm_summary"))
+
+    try:
+        update_dataset_profile(dataset_id, profile_json)
+        update_data = {"status": "COMPLETED"}
+        if target_column:
+            update_data["target_column"] = target_column
+        if task_type:
+            update_data["task_type"] = task_type
+
+        client = get_service_client()
+        client.schema("data_agent").table("datasets").update(update_data).eq("id", dataset_id).execute()
+    except Exception as exc:
+        logger.warning(f"Could not persist agent cleaning report to DB: {exc}")
+
+    return {
+        "dataset_id": dataset_id,
+        "status": "CLEANED",
+        "task_type": effective_task,
+        "target_column": effective_target,
+        "report": run_result,
+        "final_profile": final_profile,
+        "download_url": f"/api/v1/projects/{project_id}/datasets/{dataset_id}/download",
+    }
+
+
+@router.post(
+    "/api/v1/datasets/{dataset_id}/agent-clean",
+    summary="Autonomous multi-step agentic cleaning loop (direct)",
+    status_code=status.HTTP_200_OK,
+)
+def clean_direct_dataset_agentic(
+    dataset_id: str,
+    task_type: Optional[str] = Query(default=None),
+    target_column: Optional[str] = Query(default=None),
+    max_iterations: int = Query(default=3, ge=1, le=5),
+):
+    """Direct route for agentic cleaning without project_id in URL."""
+    dataset = get_dataset(dataset_id)
+    if not dataset:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "dataset_not_found", "message": f"Dataset '{dataset_id}' not found."},
+        )
+    return clean_project_dataset_agentic(
+        project_id=dataset["project_id"],
+        dataset_id=dataset_id,
+        task_type=task_type,
+        target_column=target_column,
+        max_iterations=max_iterations,
+    )
+
 
 
 @router.get(

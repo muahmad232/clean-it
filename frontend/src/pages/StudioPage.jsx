@@ -10,7 +10,9 @@ import {
   CheckCircle2,
   Table,
   ShieldAlert,
-  Sparkles
+  Sparkles,
+  FolderPlus,
+  Plus
 } from 'lucide-react'
 import UploadZone from '../components/UploadZone'
 import ProfileStats from '../components/ProfileStats'
@@ -18,6 +20,8 @@ import IssuesList from '../components/IssuesList'
 import ColumnsExplorer from '../components/ColumnsExplorer'
 import LlmSummaryCard from '../components/LlmSummaryCard'
 import CleanActionCard from '../components/CleanActionCard'
+import AiInsightsCard from '../components/AiInsightsCard'
+import { createProject } from '../api'
 
 const QUICK_SAMPLES = [
   {
@@ -52,6 +56,9 @@ const QUICK_SAMPLES = [
 
 export default function StudioPage({
   project,
+  projects = [],
+  onSelectProject,
+  onRefreshProjects,
   activeDataset,
   profileData,
   issuesData,
@@ -63,8 +70,12 @@ export default function StudioPage({
   onUploadAndProfile,
   onReset,
   onErrorDismiss,
+  onDatasetCleaned,
 }) {
   const [loadingSample, setLoadingSample] = useState(null)
+  const [showNewProjectModal, setShowNewProjectModal] = useState(false)
+  const [newProjectName, setNewProjectName] = useState('')
+  const [creatingProject, setCreatingProject] = useState(false)
 
   const handleQuickLoad = async (sample) => {
     setLoadingSample(sample.name)
@@ -72,11 +83,30 @@ export default function StudioPage({
       const res = await fetch(sample.url)
       const blob = await res.blob()
       const file = new File([blob], sample.filename, { type: 'text/csv' })
-      await onUploadAndProfile(file, sample.task)
+      await onUploadAndProfile(file, sample.task, project?.id)
     } catch (err) {
       console.error('Failed to load sample dataset:', err)
     } finally {
       setLoadingSample(null)
+    }
+  }
+
+  const handleCreateProjectInline = async (e) => {
+    e.preventDefault()
+    if (!newProjectName.trim()) return
+    setCreatingProject(true)
+    try {
+      const res = await createProject(newProjectName.trim(), 'Interactive cleaning workspace')
+      if (res?.project) {
+        if (onSelectProject) onSelectProject(res.project)
+        if (onRefreshProjects) await onRefreshProjects()
+      }
+      setNewProjectName('')
+      setShowNewProjectModal(false)
+    } catch (err) {
+      alert(`Could not create project: ${err.message}`)
+    } finally {
+      setCreatingProject(false)
     }
   }
 
@@ -89,7 +119,7 @@ export default function StudioPage({
         alignItems: 'center',
         flexWrap: 'wrap',
         gap: '1rem',
-        marginBottom: '1.75rem',
+        marginBottom: '1.5rem',
         paddingBottom: '1rem',
         borderBottom: '1px solid var(--border-subtle)',
       }}>
@@ -112,7 +142,7 @@ export default function StudioPage({
           </div>
           <p style={{ color: 'var(--text-secondary)', fontSize: '0.825rem' }}>
             {activeDataset
-              ? `Workspace container: ${project?.name || 'Default Studio'} &bull; Ingested via streaming Polars`
+              ? `Associated with project: ${project?.name || 'Studio Project'} &bull; Ingested via streaming Polars`
               : 'Interactive workspace for deterministic data profiling, defect diagnosis, and task cleaning.'}
           </p>
         </div>
@@ -158,11 +188,64 @@ export default function StudioPage({
         </div>
       )}
 
-      {/* State A: No Dataset Loaded Yet -> Centered Ingest Box + Quick Benchmarks */}
+      {/* State A: No Dataset Loaded Yet -> Project Target Bar + Centered Ingest Box + Quick Benchmarks */}
       {!profileData && (
         <div>
+          {/* Project Selector Bar */}
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '0.75rem',
+            background: 'var(--bg-subtle)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: 'var(--radius-sm)',
+            padding: '0.65rem 1rem',
+            marginBottom: '1.25rem',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap' }}>
+              <FolderPlus size={16} color="var(--text-secondary)" />
+              <span style={{ fontSize: '0.825rem', color: 'var(--text-secondary)' }}>Target Project:</span>
+              {projects && projects.length > 0 ? (
+                <select
+                  value={project?.id || ''}
+                  onChange={(e) => {
+                    const found = projects.find(p => p.id === e.target.value)
+                    if (found && onSelectProject) onSelectProject(found)
+                  }}
+                  className="select-input"
+                  style={{
+                    background: 'var(--bg-surface)',
+                    border: '1px solid var(--border-medium)',
+                    color: 'var(--text-primary)',
+                    borderRadius: 'var(--radius-sm)',
+                    padding: '0.35rem 0.65rem',
+                    fontSize: '0.825rem',
+                    outline: 'none',
+                  }}
+                >
+                  {projects.map(p => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+              ) : (
+                <span style={{ fontSize: '0.825rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                  {project?.name || 'Default Data Studio'}
+                </span>
+              )}
+            </div>
+
+            <button
+              onClick={() => setShowNewProjectModal(true)}
+              className="btn btn-secondary btn-xs"
+            >
+              <Plus size={12} /> New Project
+            </button>
+          </div>
+
           <UploadZone
-            onUploadComplete={onUploadAndProfile}
+            onUploadComplete={(file, taskType) => onUploadAndProfile(file, taskType, project?.id)}
             isUploading={isUploading || loadingSample !== null}
             uploadProgress={uploadProgress}
           />
@@ -209,7 +292,17 @@ export default function StudioPage({
           {/* 1. Summary KPI Metrics */}
           <ProfileStats profile={profileData} issues={issuesData} />
 
-          {/* 2. Task-Aware Cleaning & Download Engine (Relocated right below KPIs for immediate action) */}
+          {/* 2. Groq LLM Autonomous Agent: Iterative Diagnosis & Cleaning Loop */}
+          <AiInsightsCard
+            dataset={activeDataset}
+            projectId={activeDataset?.project_id || project?.id}
+            profile={profileData}
+            issues={issuesData}
+            taskType={activeDataset?.task_type || 'GENERAL'}
+            onDatasetCleaned={onDatasetCleaned}
+          />
+
+          {/* 3. Task-Aware Cleaning & Download Engine */}
           <CleanActionCard
             dataset={activeDataset}
             projectId={activeDataset?.project_id || project?.id}
@@ -226,6 +319,69 @@ export default function StudioPage({
 
           {/* 5. Telemetry & Context */}
           <LlmSummaryCard summary={profileData.llm_summary} />
+        </div>
+      )}
+
+      {/* Create Project Inline Modal */}
+      {showNewProjectModal && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          zIndex: 1000,
+          background: 'rgba(0, 0, 0, 0.75)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '1rem',
+        }}>
+          <div className="card" style={{ width: '100%', maxWidth: '400px', padding: '1.75rem' }}>
+            <h3 style={{ fontSize: '1.15rem', fontWeight: 600, marginBottom: '0.35rem' }}>
+              Create New Project
+            </h3>
+            <p style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', marginBottom: '1.25rem' }}>
+              Create a workspace container to isolate this dataset and its cleaning rules.
+            </p>
+
+            <form onSubmit={handleCreateProjectInline}>
+              <div style={{ marginBottom: '1.25rem' }}>
+                <input
+                  type="text"
+                  required
+                  autoFocus
+                  placeholder="e.g. Q3 Sales Data"
+                  value={newProjectName}
+                  onChange={(e) => setNewProjectName(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '0.55rem 0.75rem',
+                    background: 'var(--bg-subtle)',
+                    border: '1px solid var(--border-medium)',
+                    borderRadius: 'var(--radius-sm)',
+                    color: 'var(--text-primary)',
+                    fontSize: '0.85rem',
+                    outline: 'none',
+                  }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
+                <button
+                  type="button"
+                  onClick={() => setShowNewProjectModal(false)}
+                  className="btn btn-secondary btn-sm"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={creatingProject || !newProjectName.trim()}
+                  className="btn btn-primary btn-sm"
+                >
+                  {creatingProject ? 'Creating...' : 'Create & Select'}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>

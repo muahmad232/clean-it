@@ -132,8 +132,11 @@ def test_expired_dataset_download_returns_410():
     try:
         client_db = get_service_client()
         fifteen_days_ago = (datetime.now(timezone.utc) - timedelta(days=15)).isoformat()
+        five_days_ago = (datetime.now(timezone.utc) - timedelta(days=5)).isoformat()
         client_db.schema("data_agent").table("datasets").update({
             "created_at": fifteen_days_ago,
+            "expires_at": five_days_ago,
+            "storage_path": "dummy/expired.csv",
         }).eq("id", dataset_id).execute()
 
         res = client.get(f"/api/v1/projects/{project_id}/datasets/{dataset_id}/download")
@@ -141,4 +144,40 @@ def test_expired_dataset_download_returns_410():
         assert res.json()["detail"]["error"] == "dataset_expired"
     finally:
         delete_project(project_id)
+
+
+def test_claim_project_endpoint():
+    anon_user = "00000000-0000-0000-0000-000000000001"
+    p = create_project(anon_user, ProjectCreate(name="GuestProject"))
+    project_id = p["id"]
+    try:
+        res = client.post(f"/api/v1/projects/{project_id}/claim", headers={"X-User-Id": TEST_USER_ID})
+        assert res.status_code == 200
+        data = res.json()
+        assert data["status"] == "claimed"
+        assert str(data["project"]["user_id"]) == TEST_USER_ID
+    finally:
+        delete_project(project_id)
+
+
+def test_add_sample_dataset_to_project():
+    p = create_project(TEST_USER_ID, ProjectCreate(name="SampleTestProject"))
+    project_id = p["id"]
+    try:
+        res = client.post(
+            f"/api/v1/projects/{project_id}/datasets/sample",
+            json={"sample_key": "telco_churn"},
+            headers={"X-User-Id": TEST_USER_ID},
+        )
+        assert res.status_code == 201
+        data = res.json()
+        assert "dataset" in data
+        assert data["dataset"]["project_id"] == project_id
+
+        # Verify listed in user datasets
+        user_ds = list_user_datasets(TEST_USER_ID)
+        assert any(d["id"] == data["dataset"]["id"] for d in user_ds)
+    finally:
+        delete_project(project_id)
+
 

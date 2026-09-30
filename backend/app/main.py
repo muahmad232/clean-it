@@ -154,6 +154,10 @@ def _register_routes(app: FastAPI) -> None:
     from app.routers.clean import router as clean_router
     app.include_router(clean_router)
 
+    # Phase 7: Groq LLM Engine
+    from app.routers.llm import router as llm_router
+    app.include_router(llm_router)
+
     @app.get(
         "/health",
         tags=["System"],

@@ -21,7 +21,7 @@ polars==1.30.0           # Lazy CSV/Parquet scanner — never pandas
 # scikit-learn==1.5.2
 
 # ── Phase 7+: Groq ───────────────────────────────────────────────
-# groq==0.11.0
+groq>=0.11.0
 
 # ── File format support ───────────────────────────────────────────
 # pyarrow==17.0.0          # Parquet read/write

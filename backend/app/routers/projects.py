@@ -102,6 +102,32 @@ def delete_project_endpoint(
     return {"status": "deleted", "project_id": project_id}
 
 
+@router.post(
+    "/{project_id}/claim",
+    summary="Claim ownership of a project for authenticated user",
+    status_code=status.HTTP_200_OK,
+)
+def claim_project_endpoint(
+    project_id: str,
+    x_user_id: Optional[str] = Header(default=None, alias="X-User-Id"),
+):
+    """Reassign project ownership to the caller's user_id."""
+    from app.database.repositories.datasets import claim_project as repo_claim_project
+
+    if not x_user_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"error": "missing_user", "message": "X-User-Id header required to claim project."},
+        )
+    record = repo_claim_project(project_id, x_user_id)
+    if not record:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "project_not_found", "message": f"Project '{project_id}' not found."},
+        )
+    return {"status": "claimed", "project": record}
+
+
 @router.delete(
     "/{project_id}/datasets/{dataset_id}",
     summary="Delete a dataset in project",

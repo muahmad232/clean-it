@@ -25,7 +25,7 @@ class Settings(BaseSettings):
 
     # ── Groq ─────────────────────────────────────────────────────
     groq_api_key: str = Field(default="")
-    groq_model: str = Field(default="qwen/qwen3-32b")
+    groq_model: str = Field(default="qwen/qwen3.8-27b")
 
     # ── Supabase ─────────────────────────────────────────────────
     supabase_url: str = Field(default="")

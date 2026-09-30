@@ -47,10 +47,12 @@ export async function fetchLimits() {
  * Creates or retrieves a valid project from the backend for dataset uploads.
  */
 export async function getOrCreateDefaultProject() {
-  const cachedId = localStorage.getItem('cleanit_project_id')
+  const userId = localStorage.getItem('cleanit_user_id')
+  const cacheKey = userId ? `cleanit_project_id_${userId}` : 'cleanit_project_id_guest'
+  const cachedId = localStorage.getItem(cacheKey) || localStorage.getItem('cleanit_project_id')
   const authHeaders = getAuthHeaders()
 
-  // 1. Verify if cached project actually exists in database
+  // 1. Verify if cached project actually exists in database AND belongs to this user
   if (cachedId && cachedId !== '00000000-0000-0000-0000-000000000001') {
     try {
       const checkRes = await fetch(`${API_BASE}/api/v1/projects/${cachedId}`, {
@@ -58,7 +60,20 @@ export async function getOrCreateDefaultProject() {
       })
       if (checkRes.ok) {
         const data = await checkRes.json()
-        if (data.project) return data.project
+        if (data.project) {
+          const projUserId = String(data.project.user_id || '')
+          if (!userId || projUserId === userId) {
+            localStorage.setItem(cacheKey, data.project.id)
+            return data.project
+          }
+          // If project was default anon and user is now authenticated, claim it
+          if (userId && projUserId === '00000000-0000-0000-0000-000000000001') {
+            await claimProject(data.project.id).catch(() => null)
+            data.project.user_id = userId
+            localStorage.setItem(cacheKey, data.project.id)
+            return data.project
+          }
+        }
       }
     } catch {
       // Fall through to list/create
@@ -74,7 +89,7 @@ export async function getOrCreateDefaultProject() {
       const listData = await listRes.json()
       if (listData.projects && listData.projects.length > 0) {
         const existing = listData.projects[0]
-        localStorage.setItem('cleanit_project_id', existing.id)
+        localStorage.setItem(cacheKey, existing.id)
         return existing
       }
     }
@@ -95,7 +110,7 @@ export async function getOrCreateDefaultProject() {
     if (createRes.ok) {
       const createData = await createRes.json()
       if (createData.project) {
-        localStorage.setItem('cleanit_project_id', createData.project.id)
+        localStorage.setItem(cacheKey, createData.project.id)
         return createData.project
       }
     }
@@ -105,6 +120,37 @@ export async function getOrCreateDefaultProject() {
 
   // Fallback
   return { id: cachedId, name: 'Default Data Studio' }
+}
+
+/**
+ * Claims ownership of a project for the authenticated user.
+ */
+export async function claimProject(projectId) {
+  const res = await fetch(`${API_BASE}/api/v1/projects/${projectId}/claim`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+  })
+  if (!res.ok) throw new Error('Failed to claim project')
+  return await res.json()
+}
+
+/**
+ * Adds a benchmark dataset into a specific project without manual file upload.
+ */
+export async function addSampleDataset(projectId, sampleKey = 'telco_churn', taskType = null) {
+  const res = await fetch(`${API_BASE}/api/v1/projects/${projectId}/datasets/sample`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...getAuthHeaders(),
+    },
+    body: JSON.stringify({ sample_key: sampleKey, task_type: taskType }),
+  })
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({}))
+    throw new Error(errBody.detail?.message || 'Failed to add sample dataset')
+  }
+  return await res.json()
 }
 
 /**
@@ -286,3 +332,92 @@ export async function triggerRetentionCleanup() {
   if (!res.ok) throw new Error('Cleanup trigger failed')
   return await res.json()
 }
+
+/**
+ * Checks LLM engine provider and token telemetry.
+ */
+export async function fetchLlmHealth() {
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/llm/health`, {
+      headers: getAuthHeaders(),
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    return await res.json()
+  } catch (err) {
+    return {
+      provider: 'GroqProvider',
+      model: 'qwen/qwen3.8-27b',
+      api_key_configured: false,
+      token_stats: { total_calls: 0, prompt_tokens: 0, completion_tokens: 0 },
+    }
+  }
+}
+
+/**
+ * Generates AI diagnostics, defect impact reasoning, and cleaning strategies via Groq LLM.
+ */
+export async function analyzeDatasetWithLlm({
+  datasetName = 'Dataset',
+  taskType = 'GENERAL',
+  rowCount = 0,
+  columnCount = 0,
+  duplicateRows = 0,
+  llmSummary = '',
+  issues = [],
+}) {
+  const res = await fetch(`${API_BASE}/api/v1/llm/analyze`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...getAuthHeaders(),
+    },
+    body: JSON.stringify({
+      dataset_name: datasetName,
+      task_type: taskType,
+      row_count: rowCount,
+      column_count: columnCount,
+      duplicate_rows: duplicateRows,
+      llm_summary: llmSummary,
+      issues: issues,
+    }),
+  })
+
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({}))
+    throw new Error(errBody.detail?.message || errBody.detail?.error || `AI Analysis failed (HTTP ${res.status})`)
+  }
+
+  return await res.json()
+}
+
+/**
+ * Triggers the autonomous multi-step agentic cleaning loop:
+ * LLM diagnoses -> Selects functions -> Polars cleans -> Re-profiles -> Iterates until clean.
+ */
+export async function runAgenticCleaning(projectId, datasetId, taskType = 'GENERAL', targetColumn = null, maxIterations = 3) {
+  const params = new URLSearchParams()
+  if (taskType) params.append('task_type', taskType)
+  if (targetColumn) params.append('target_column', targetColumn)
+  if (maxIterations) params.append('max_iterations', maxIterations)
+
+  const url = projectId
+    ? `${API_BASE}/api/v1/projects/${projectId}/datasets/${datasetId}/agent-clean?${params.toString()}`
+    : `${API_BASE}/api/v1/datasets/${datasetId}/agent-clean?${params.toString()}`
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...getAuthHeaders(),
+    },
+  })
+
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({}))
+    throw new Error(errBody.detail?.message || errBody.detail?.error || `Agentic cleaning failed (HTTP ${res.status})`)
+  }
+
+  return await res.json()
+}
+
+

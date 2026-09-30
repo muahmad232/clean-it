@@ -78,6 +78,23 @@ def list_projects(user_id: str) -> list[dict]:
     return result.data
 
 
+def claim_project(project_id: str, new_user_id: str) -> Optional[dict]:
+    """Reassign project ownership to new_user_id."""
+    client = get_service_client()
+    result = (
+        client.schema(SCHEMA)
+        .table("projects")
+        .update({"user_id": new_user_id})
+        .eq("id", project_id)
+        .execute()
+    )
+    if result.data:
+        logger.info(f"Claimed project id={project_id} for user={new_user_id}")
+        return result.data[0]
+    return None
+
+
+
 # ══════════════════════════════════════════════════════════════════
 # DATASETS
 # ══════════════════════════════════════════════════════════════════
