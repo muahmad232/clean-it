@@ -1,0 +1,18 @@
+# Node / Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.oxlintcache
+
+# Python / Backend
+backend/.venv/
+backend/__pycache__/
+backend/**/__pycache__/
+*.pyc
+backend/.pytest_cache/
+backend/.env
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

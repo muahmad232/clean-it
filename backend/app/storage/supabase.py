@@ -97,7 +97,7 @@ def ensure_bucket_exists() -> None:
             client.storage.create_bucket(BUCKET_NAME, options={"public": False})
             logger.info(f"Created Supabase Storage bucket: '{BUCKET_NAME}'")
         else:
-            logger.info(f"Storage bucket '{BUCKET_NAME}' already exists ✓")
+            logger.info(f"Storage bucket '{BUCKET_NAME}' already exists [OK]")
     except Exception as e:
         logger.error(f"Failed to ensure storage bucket exists: {e}")
         raise

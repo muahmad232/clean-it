@@ -59,7 +59,7 @@ async def lifespan(app: FastAPI):
             # DB ping: list tables in data_agent schema
             client = get_service_client()
             client.schema("data_agent").table("projects").select("id").limit(1).execute()
-            logger.info("Supabase DB connection ✓")
+            logger.info("Supabase DB connection [OK]")
 
             # Storage: ensure datasets bucket exists
             ensure_bucket_exists()
