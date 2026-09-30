@@ -153,3 +153,36 @@ def update_dataset_status(dataset_id: str, status: str, extra: Optional[dict] = 
     record = result.data[0]
     logger.info(f"Updated dataset id={dataset_id} status={status}")
     return record
+
+
+def update_dataset_profile(dataset_id: str, profile_dict: dict) -> dict:
+    """
+    Persist a completed profile to the datasets row.
+
+    Sets:
+      - profile_json  (JSONB)
+      - profiled_at   (now)
+      - status        → COMPLETED
+    """
+    from datetime import datetime, timezone
+    import json as _json
+
+    client = get_service_client()
+    payload = {
+        "profile_json": profile_dict,
+        "profiled_at": datetime.now(timezone.utc).isoformat(),
+        "status": "COMPLETED",
+        # Update row/column counts from the profile if present
+        "row_count": profile_dict.get("shape", {}).get("rows"),
+        "column_count": profile_dict.get("shape", {}).get("columns"),
+    }
+    result = (
+        client.schema(SCHEMA)
+        .table("datasets")
+        .update(payload)
+        .eq("id", dataset_id)
+        .execute()
+    )
+    record = result.data[0]
+    logger.info(f"Profile saved for dataset id={dataset_id} rows={payload['row_count']}")
+    return record

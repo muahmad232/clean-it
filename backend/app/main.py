@@ -17,6 +17,10 @@ Phase 3 additions:
   - GET  /api/v1/projects/{project_id}/datasets
   - GET  /api/v1/projects/{project_id}/datasets/{dataset_id}
   - GET  /api/v1/limits
+
+Phase 4 additions:
+  - POST /api/v1/projects/{project_id}/datasets/{dataset_id}/profile
+  - GET  /api/v1/projects/{project_id}/datasets/{dataset_id}/profile
 """
 
 from contextlib import asynccontextmanager
@@ -128,6 +132,14 @@ def _register_routes(app: FastAPI) -> None:
     from app.routers.upload import router as upload_router, limits_router
     app.include_router(upload_router)
     app.include_router(limits_router)
+
+    # Phase 4: Dataset profiling
+    from app.routers.profile import router as profile_router
+    app.include_router(profile_router)
+
+    # Phase 5: Basic Issue Detection
+    from app.routers.issues import router as issues_router
+    app.include_router(issues_router)
 
     @app.get(
         "/health",
