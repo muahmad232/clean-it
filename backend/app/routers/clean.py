@@ -172,6 +172,34 @@ def download_project_dataset(project_id: str, dataset_id: str):
             detail={"error": "dataset_not_found", "message": f"Dataset '{dataset_id}' not found."},
         )
 
+    # Check 10-day retention expiration
+    from datetime import datetime, timezone, timedelta
+    created_at_str = dataset.get("created_at")
+    expires_at_str = dataset.get("expires_at")
+    now = datetime.now(timezone.utc)
+
+    expires_dt = None
+    if expires_at_str:
+        try:
+            expires_dt = datetime.fromisoformat(expires_at_str.replace("Z", "+00:00"))
+        except Exception:
+            pass
+    if not expires_dt and created_at_str:
+        try:
+            created_dt = datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
+            expires_dt = created_dt + timedelta(days=10)
+        except Exception:
+            pass
+
+    if expires_dt and now > expires_dt:
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail={
+                "error": "dataset_expired",
+                "message": "This dataset has exceeded the 10-day retention window and is no longer available for download.",
+            },
+        )
+
     profile_json = dataset.get("profile_json") or {}
     cleaned_path = profile_json.get("cleaned_storage_path")
     original_path = dataset.get("storage_path")

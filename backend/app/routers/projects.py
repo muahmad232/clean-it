@@ -79,3 +79,93 @@ def get_project(project_id: str):
             detail={"error": "project_not_found", "message": f"Project '{project_id}' not found."},
         )
     return {"project": record}
+
+
+@router.delete(
+    "/{project_id}",
+    summary="Delete a project workspace",
+    status_code=status.HTTP_200_OK,
+)
+def delete_project_endpoint(
+    project_id: str,
+    x_user_id: Optional[str] = Header(default=None, alias="X-User-Id"),
+):
+    """Delete a project container and all associated datasets and files."""
+    from app.database.repositories.datasets import delete_project as repo_delete_project
+
+    success = repo_delete_project(project_id, user_id=x_user_id)
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "project_not_found", "message": f"Project '{project_id}' not found or access denied."},
+        )
+    return {"status": "deleted", "project_id": project_id}
+
+
+@router.delete(
+    "/{project_id}/datasets/{dataset_id}",
+    summary="Delete a dataset in project",
+    status_code=status.HTTP_200_OK,
+)
+def delete_project_dataset(project_id: str, dataset_id: str):
+    """Delete a dataset and its storage files."""
+    from app.database.repositories.datasets import delete_dataset as repo_delete_dataset
+
+    success = repo_delete_dataset(dataset_id)
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "dataset_not_found", "message": f"Dataset '{dataset_id}' not found."},
+        )
+    return {"status": "deleted", "dataset_id": dataset_id}
+
+
+# ── Standalone User & Maintenance Routes ──────────────────────────
+user_datasets_router = APIRouter(tags=["User Datasets & Retention"])
+
+
+@user_datasets_router.get(
+    "/api/v1/user/datasets",
+    summary="List all datasets for authenticated user",
+    status_code=status.HTTP_200_OK,
+)
+def get_user_datasets(
+    x_user_id: Optional[str] = Header(default=None, alias="X-User-Id"),
+):
+    """List all datasets across all projects belonging to user, with 10-day retention countdown."""
+    from app.database.repositories.datasets import list_user_datasets as repo_list_user_datasets
+
+    user_id = x_user_id or DEFAULT_USER_ID
+    datasets = repo_list_user_datasets(user_id)
+    return {"datasets": datasets}
+
+
+@user_datasets_router.delete(
+    "/api/v1/datasets/{dataset_id}",
+    summary="Delete dataset (direct route)",
+    status_code=status.HTTP_200_OK,
+)
+def delete_direct_dataset(dataset_id: str):
+    """Delete dataset by ID."""
+    from app.database.repositories.datasets import delete_dataset as repo_delete_dataset
+
+    success = repo_delete_dataset(dataset_id)
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "dataset_not_found", "message": f"Dataset '{dataset_id}' not found."},
+        )
+    return {"status": "deleted", "dataset_id": dataset_id}
+
+
+@user_datasets_router.post(
+    "/api/v1/maintenance/cleanup-expired",
+    summary="Trigger 10-day retention cleanup",
+    status_code=status.HTTP_200_OK,
+)
+def trigger_retention_cleanup():
+    """Purge datasets older than the 10-day retention period from storage and database."""
+    from app.database.repositories.datasets import cleanup_expired_datasets
+
+    purged_count = cleanup_expired_datasets()
+    return {"status": "completed", "purged_datasets_count": purged_count}

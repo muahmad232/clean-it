@@ -30,7 +30,7 @@ def get_service_client() -> Client:
             "SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set in .env"
         )
     client = create_client(settings.supabase_url, settings.supabase_service_role_key)
-    logger.info(f"Supabase service client initialised → {settings.supabase_url}")
+    logger.info(f"Supabase service client initialised -> {settings.supabase_url}")
     return client
 
 

@@ -1,9 +1,22 @@
 /**
  * Backend API Client
- * Seamlessly interfaces with the FastAPI backend (local or production).
+ * Interfaces with the FastAPI backend and coordinates with Supabase Auth.
  */
 
 const API_BASE = ''  // Handled by Vite proxy in development or direct host in prod
+
+export function getAuthHeaders() {
+  const headers = {}
+  const userId = localStorage.getItem('cleanit_user_id')
+  if (userId) {
+    headers['X-User-Id'] = userId
+  }
+  const token = localStorage.getItem('cleanit_access_token')
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`
+  }
+  return headers
+}
 
 export async function fetchHealth() {
   try {
@@ -21,7 +34,6 @@ export async function fetchLimits() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     return await res.json()
   } catch (err) {
-    // Default fallback matching backend config
     return {
       max_upload_size_mb: 50,
       max_rows: 1000000,
@@ -36,11 +48,14 @@ export async function fetchLimits() {
  */
 export async function getOrCreateDefaultProject() {
   const cachedId = localStorage.getItem('cleanit_project_id')
+  const authHeaders = getAuthHeaders()
 
   // 1. Verify if cached project actually exists in database
   if (cachedId && cachedId !== '00000000-0000-0000-0000-000000000001') {
     try {
-      const checkRes = await fetch(`${API_BASE}/api/v1/projects/${cachedId}`)
+      const checkRes = await fetch(`${API_BASE}/api/v1/projects/${cachedId}`, {
+        headers: authHeaders,
+      })
       if (checkRes.ok) {
         const data = await checkRes.json()
         if (data.project) return data.project
@@ -50,9 +65,11 @@ export async function getOrCreateDefaultProject() {
     }
   }
 
-  // 2. Fetch existing projects
+  // 2. Fetch existing projects for user
   try {
-    const listRes = await fetch(`${API_BASE}/api/v1/projects`)
+    const listRes = await fetch(`${API_BASE}/api/v1/projects`, {
+      headers: authHeaders,
+    })
     if (listRes.ok) {
       const listData = await listRes.json()
       if (listData.projects && listData.projects.length > 0) {
@@ -65,7 +82,10 @@ export async function getOrCreateDefaultProject() {
     // 3. None exist yet — create a new project record in Supabase
     const createRes = await fetch(`${API_BASE}/api/v1/projects`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...authHeaders,
+      },
       body: JSON.stringify({
         name: 'Default Data Studio',
         description: 'Interactive data cleaning workspace',
@@ -88,6 +108,46 @@ export async function getOrCreateDefaultProject() {
 }
 
 /**
+ * Lists all projects for the user.
+ */
+export async function fetchProjects() {
+  const res = await fetch(`${API_BASE}/api/v1/projects`, {
+    headers: getAuthHeaders(),
+  })
+  if (!res.ok) throw new Error('Failed to fetch projects')
+  const data = await res.json()
+  return data.projects || []
+}
+
+/**
+ * Creates a new project container.
+ */
+export async function createProject(name, description = '') {
+  const res = await fetch(`${API_BASE}/api/v1/projects`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...getAuthHeaders(),
+    },
+    body: JSON.stringify({ name, description }),
+  })
+  if (!res.ok) throw new Error('Failed to create project')
+  return await res.json()
+}
+
+/**
+ * Deletes a project and all its child datasets and files.
+ */
+export async function deleteProject(projectId) {
+  const res = await fetch(`${API_BASE}/api/v1/projects/${projectId}`, {
+    method: 'DELETE',
+    headers: getAuthHeaders(),
+  })
+  if (!res.ok) throw new Error('Failed to delete project')
+  return await res.json()
+}
+
+/**
  * Uploads a file using multipart form-data.
  */
 export async function uploadDatasetFile(projectId, file, taskType = 'GENERAL') {
@@ -98,6 +158,7 @@ export async function uploadDatasetFile(projectId, file, taskType = 'GENERAL') {
     `${API_BASE}/api/v1/projects/${projectId}/datasets/upload?task_type=${taskType}`,
     {
       method: 'POST',
+      headers: getAuthHeaders(),
       body: formData,
     }
   )
@@ -118,7 +179,10 @@ export async function triggerDatasetProfile(projectId, datasetId) {
     `${API_BASE}/api/v1/projects/${projectId}/datasets/${datasetId}/profile`,
     {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeaders(),
+      },
     }
   )
 
@@ -139,7 +203,9 @@ export async function fetchDatasetIssues(projectId, datasetId, { severity, issue
   if (issueType && issueType !== 'ALL') params.append('issue_type', issueType)
 
   const url = `${API_BASE}/api/v1/projects/${projectId}/datasets/${datasetId}/issues?${params.toString()}`
-  const res = await fetch(url)
+  const res = await fetch(url, {
+    headers: getAuthHeaders(),
+  })
 
   if (!res.ok) {
     const errBody = await res.json().catch(() => ({}))
@@ -160,7 +226,10 @@ export async function cleanDataset(projectId, datasetId, taskType = 'GENERAL', t
   const url = `${API_BASE}/api/v1/projects/${projectId}/datasets/${datasetId}/clean?${params.toString()}`
   const res = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...getAuthHeaders(),
+    },
   })
 
   if (!res.ok) {
@@ -172,8 +241,48 @@ export async function cleanDataset(projectId, datasetId, taskType = 'GENERAL', t
 }
 
 /**
+ * Lists all datasets across all projects belonging to the user with 10-day retention countdown.
+ */
+export async function fetchUserDatasets() {
+  const res = await fetch(`${API_BASE}/api/v1/user/datasets`, {
+    headers: getAuthHeaders(),
+  })
+  if (!res.ok) throw new Error('Failed to fetch user datasets')
+  const data = await res.json()
+  return data.datasets || []
+}
+
+/**
+ * Deletes a dataset and removes its files from Supabase Storage.
+ */
+export async function deleteDataset(projectId, datasetId) {
+  const url = projectId
+    ? `${API_BASE}/api/v1/projects/${projectId}/datasets/${datasetId}`
+    : `${API_BASE}/api/v1/datasets/${datasetId}`
+
+  const res = await fetch(url, {
+    method: 'DELETE',
+    headers: getAuthHeaders(),
+  })
+  if (!res.ok) throw new Error('Failed to delete dataset')
+  return await res.json()
+}
+
+/**
  * Returns direct download URL for dataset.
  */
 export function getDownloadUrl(projectId, datasetId) {
   return `${API_BASE}/api/v1/projects/${projectId}/datasets/${datasetId}/download`
+}
+
+/**
+ * Triggers 10-day retention cleanup of expired datasets.
+ */
+export async function triggerRetentionCleanup() {
+  const res = await fetch(`${API_BASE}/api/v1/maintenance/cleanup-expired`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+  })
+  if (!res.ok) throw new Error('Cleanup trigger failed')
+  return await res.json()
 }

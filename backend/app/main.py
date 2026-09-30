@@ -128,9 +128,14 @@ def create_app() -> FastAPI:
 def _register_routes(app: FastAPI) -> None:
     """Register all routers. Add new routers here as phases progress."""
 
-    # Phase 2: Projects
-    from app.routers.projects import router as projects_router
+    # Phase 2: Projects & User Datasets
+    from app.routers.projects import router as projects_router, user_datasets_router
     app.include_router(projects_router)
+    app.include_router(user_datasets_router)
+
+    # Auth & Config
+    from app.routers.auth import router as auth_router
+    app.include_router(auth_router)
 
     # Phase 3: Dataset upload
     from app.routers.upload import router as upload_router, limits_router

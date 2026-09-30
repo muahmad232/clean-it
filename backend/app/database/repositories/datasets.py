@@ -186,3 +186,150 @@ def update_dataset_profile(dataset_id: str, profile_dict: dict) -> dict:
     record = result.data[0]
     logger.info(f"Profile saved for dataset id={dataset_id} rows={payload['row_count']}")
     return record
+
+
+def delete_dataset(dataset_id: str) -> bool:
+    """Delete a dataset, its files in Supabase Storage, and associated issue rows."""
+    from app.storage.supabase import delete_file
+
+    client = get_service_client()
+    dataset = get_dataset(dataset_id)
+    if not dataset:
+        return False
+
+    # 1. Clean up storage files
+    storage_path = dataset.get("storage_path")
+    if storage_path:
+        delete_file(storage_path)
+
+    profile_json = dataset.get("profile_json") or {}
+    cleaned_path = profile_json.get("cleaned_storage_path")
+    if cleaned_path:
+        delete_file(cleaned_path)
+
+    # 2. Delete issues
+    try:
+        client.schema(SCHEMA).table("issues").delete().eq("dataset_id", dataset_id).execute()
+    except Exception as exc:
+        logger.warning(f"Could not delete issues for dataset {dataset_id}: {exc}")
+
+    # 3. Delete dataset record
+    client.schema(SCHEMA).table("datasets").delete().eq("id", dataset_id).execute()
+    logger.info(f"Deleted dataset id={dataset_id}")
+    return True
+
+
+def delete_project(project_id: str, user_id: Optional[str] = None) -> bool:
+    """Delete a project and all its child datasets and files."""
+    client = get_service_client()
+    query = client.schema(SCHEMA).table("projects").select("id, user_id").eq("id", project_id)
+    if user_id:
+        query = query.eq("user_id", user_id)
+    res = query.limit(1).execute()
+    if not res.data:
+        return False
+
+    # Find and delete all datasets in project
+    datasets_res = client.schema(SCHEMA).table("datasets").select("id").eq("project_id", project_id).execute()
+    for row in (datasets_res.data or []):
+        delete_dataset(row["id"])
+
+    # Delete project
+    client.schema(SCHEMA).table("projects").delete().eq("id", project_id).execute()
+    logger.info(f"Deleted project id={project_id}")
+    return True
+
+
+def list_user_datasets(user_id: str) -> list[dict]:
+    """Return all datasets across all projects belonging to user_id, with 10-day retention metadata."""
+    from datetime import datetime, timezone, timedelta
+
+    client = get_service_client()
+    # 1. Fetch user's projects
+    projects_res = client.schema(SCHEMA).table("projects").select("id, name").eq("user_id", user_id).execute()
+    projects = {p["id"]: p["name"] for p in (projects_res.data or [])}
+
+    if not projects:
+        return []
+
+    project_ids = list(projects.keys())
+    # 2. Fetch datasets in those projects
+    datasets_res = (
+        client.schema(SCHEMA)
+        .table("datasets")
+        .select("id, project_id, original_filename, file_type, file_size, row_count, column_count, task_type, status, created_at, profile_json")
+        .in_("project_id", project_ids)
+        .order("created_at", desc=True)
+        .execute()
+    )
+
+    now = datetime.now(timezone.utc)
+    enriched = []
+    for d in (datasets_res.data or []):
+        d["project_name"] = projects.get(d["project_id"], "Project")
+
+        # Expiry computation (10-day retention)
+        created_at_str = d.get("created_at")
+        expires_at_str = d.get("expires_at")
+
+        expires_dt = None
+        if expires_at_str:
+            try:
+                expires_dt = datetime.fromisoformat(expires_at_str.replace("Z", "+00:00"))
+            except Exception:
+                pass
+
+        if not expires_dt and created_at_str:
+            try:
+                created_dt = datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
+                expires_dt = created_dt + timedelta(days=10)
+                d["expires_at"] = expires_dt.isoformat()
+            except Exception:
+                pass
+
+        if expires_dt:
+            is_expired = now > expires_dt
+            diff = expires_dt - now
+            d["is_expired"] = is_expired
+            d["days_remaining"] = max(0, diff.days) if not is_expired else 0
+            d["hours_remaining"] = max(0, int(diff.total_seconds() // 3600)) if not is_expired else 0
+        else:
+            d["is_expired"] = False
+            d["days_remaining"] = 10
+            d["hours_remaining"] = 240
+
+        # Has cleaned download?
+        profile_json = d.get("profile_json") or {}
+        d["has_cleaned"] = bool(profile_json.get("cleaned_storage_path"))
+        d["cleaning_report"] = profile_json.get("cleaning_report")
+        enriched.append(d)
+
+    return enriched
+
+
+def cleanup_expired_datasets() -> int:
+    """Find and delete datasets that have exceeded their 10-day retention period."""
+    from datetime import datetime, timezone, timedelta
+
+    client = get_service_client()
+    now = datetime.now(timezone.utc)
+    ten_days_ago = (now - timedelta(days=10)).isoformat()
+
+    try:
+        res = client.schema(SCHEMA).table("datasets").select("id").lt("expires_at", now.isoformat()).execute()
+        expired_ids = [row["id"] for row in (res.data or [])]
+    except Exception:
+        # Fallback if expires_at column not present in DB
+        res = client.schema(SCHEMA).table("datasets").select("id").lt("created_at", ten_days_ago).execute()
+        expired_ids = [row["id"] for row in (res.data or [])]
+
+    count = 0
+    for d_id in expired_ids:
+        try:
+            if delete_dataset(d_id):
+                count += 1
+        except Exception as e:
+            logger.error(f"Failed deleting expired dataset {d_id}: {e}")
+
+    logger.info(f"Retention cleanup: deleted {count} expired datasets")
+    return count

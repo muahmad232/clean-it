@@ -1,8 +1,14 @@
 import React, { useState, useEffect } from 'react'
-import { Activity, Database, BookOpen, Layers, Home, Sliders } from 'lucide-react'
+import { Database, BookOpen, Layers, Home, Sliders, User, LogOut, LogIn, FolderKanban } from 'lucide-react'
 import { fetchHealth } from '../api'
 
-export default function Navbar({ activeTab, onSelectTab }) {
+export default function Navbar({
+  activeTab,
+  onSelectTab,
+  user,
+  onOpenAuth,
+  onSignOut,
+}) {
   const [health, setHealth] = useState({ status: 'checking', db_status: 'checking' })
 
   useEffect(() => {
@@ -56,6 +62,15 @@ export default function Navbar({ activeTab, onSelectTab }) {
             </li>
             <li>
               <button
+                className={`nav-item ${activeTab === 'projects' ? 'active' : ''}`}
+                onClick={() => onSelectTab('projects')}
+              >
+                <FolderKanban size={15} />
+                My Datasets
+              </button>
+            </li>
+            <li>
+              <button
                 className={`nav-item ${activeTab === 'about' ? 'active' : ''}`}
                 onClick={() => onSelectTab('about')}
               >
@@ -75,13 +90,56 @@ export default function Navbar({ activeTab, onSelectTab }) {
           </ul>
         </nav>
 
-        <div className="status-pill">
-          <span className={`pulse-dot ${isOnline ? 'online' : 'error'}`} />
-          <span>{isOnline ? 'FastAPI Online' : 'Connecting'}</span>
-          {isOnline && health.db_status === 'ok' && (
-            <span style={{ color: 'var(--text-muted)', fontSize: '0.72rem' }}>
-              &bull; DB Connected
-            </span>
+        {/* User / Auth Controls */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          <div className="status-pill">
+            <span className={`pulse-dot ${isOnline ? 'online' : 'error'}`} />
+            <span>{isOnline ? 'API Ready' : 'Connecting'}</span>
+          </div>
+
+          {user ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+              <div
+                onClick={() => onSelectTab('projects')}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.4rem',
+                  background: 'var(--bg-subtle)',
+                  border: '1px solid var(--border-subtle)',
+                  padding: '0.3rem 0.65rem',
+                  borderRadius: 'var(--radius-sm)',
+                  fontSize: '0.78rem',
+                  color: 'var(--text-primary)',
+                  cursor: 'pointer',
+                  maxWidth: '180px',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+                title={user.email}
+              >
+                <User size={13} color="var(--text-muted)" />
+                <span>{user.email?.split('@')[0] || 'User'}</span>
+              </div>
+              <button
+                onClick={onSignOut}
+                className="btn btn-ghost btn-sm"
+                title="Sign Out"
+                style={{ padding: '0.35rem 0.5rem', color: 'var(--text-muted)' }}
+              >
+                <LogOut size={14} />
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={onOpenAuth}
+              className="btn btn-primary btn-sm"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+            >
+              <LogIn size={14} />
+              Sign In
+            </button>
           )}
         </div>
       </div>
