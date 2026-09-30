@@ -19,8 +19,7 @@ import ProfileStats from '../components/ProfileStats'
 import IssuesList from '../components/IssuesList'
 import ColumnsExplorer from '../components/ColumnsExplorer'
 import LlmSummaryCard from '../components/LlmSummaryCard'
-import CleanActionCard from '../components/CleanActionCard'
-import AiInsightsCard from '../components/AiInsightsCard'
+import DataCleaningCenter from '../components/DataCleaningCenter'
 import { createProject } from '../api'
 
 const QUICK_SAMPLES = [
@@ -292,23 +291,14 @@ export default function StudioPage({
           {/* 1. Summary KPI Metrics */}
           <ProfileStats profile={profileData} issues={issuesData} />
 
-          {/* 2. Groq LLM Autonomous Agent: Iterative Diagnosis & Cleaning Loop */}
-          <AiInsightsCard
+          {/* 2. Unified Data Cleaning Center (Autonomous AI Loop + Instant Deterministic + Diagnostics) */}
+          <DataCleaningCenter
             dataset={activeDataset}
             projectId={activeDataset?.project_id || project?.id}
             profile={profileData}
             issues={issuesData}
             taskType={activeDataset?.task_type || 'GENERAL'}
             onDatasetCleaned={onDatasetCleaned}
-          />
-
-          {/* 3. Task-Aware Cleaning & Download Engine */}
-          <CleanActionCard
-            dataset={activeDataset}
-            projectId={activeDataset?.project_id || project?.id}
-            profile={profileData}
-            isCleaning={isCleaning}
-            setIsCleaning={setIsCleaning}
           />
 
           {/* 3. Detailed Quality Issues Detected */}
