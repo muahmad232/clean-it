@@ -1,14 +1,14 @@
 import React from 'react'
-import { Server, Database, HardDrive, Cpu, ShieldCheck, ArrowRight, FileCheck, RefreshCw } from 'lucide-react'
+import { Server, Database, HardDrive, Cpu, ShieldCheck, FileCheck, RefreshCw } from 'lucide-react'
 
 export default function InfoPage() {
   const flowSteps = [
-    { title: "1. Upload", desc: "User uploads CSV/JSON/Parquet directly to storage with magic-byte and size validation (≤ 50MB).", icon: <Database size={18} /> },
-    { title: "2. Polars Profiler", desc: "Lazy scan_csv streaming calculates exact null counts, memory footprint, quantiles, and shape.", icon: <Cpu size={18} /> },
-    { title: "3. Issue Engine", desc: "Deterministic rules evaluate duplicates, zero-variance, high-cardinality, and type mismatches.", icon: <ShieldCheck size={18} /> },
-    { title: "4. LLM Summary", desc: "Generates an ~800-token compact summary payload formatted specifically for Groq API context windows.", icon: <Server size={18} /> },
-    { title: "5. Agent Reasoner", desc: "Groq LLM proposes a structured cleaning plan selecting ONLY from an authorized tool catalog.", icon: <RefreshCw size={18} /> },
-    { title: "6. Reversible Apply", desc: "Deterministic tools apply transformations, create versioned Parquet deltas, and roll back if quality drops.", icon: <FileCheck size={18} /> },
+    { title: "1. Ingest Guard", desc: "Validates CSV/JSON/Parquet magic bytes, encoding, and size threshold (≤ 50 MB).", icon: <Database size={16} /> },
+    { title: "2. Polars Profiler", desc: "Streaming lazy scan calculates exact null ratios, RAM requirements, quantiles, and shape.", icon: <Cpu size={16} /> },
+    { title: "3. Rule Engine", desc: "Evaluates exact duplicates, zero-variance columns, high cardinality, and type mismatches.", icon: <ShieldCheck size={16} /> },
+    { title: "4. Fingerprint Payload", desc: "Generates an ~400-token compact summary formatted specifically for downstream planning.", icon: <Server size={16} /> },
+    { title: "5. Task Cleaning", desc: "Applies deterministic Python operations tailored for classification, regression, or general tasks.", icon: <RefreshCw size={16} /> },
+    { title: "6. Immutable Export", desc: "Stores cleaned CSV in object storage and returns a before-and-after audit log.", icon: <FileCheck size={16} /> },
   ]
 
   const detectors = [
@@ -38,63 +38,64 @@ export default function InfoPage() {
     },
     {
       name: "POSSIBLE_IDENTIFIER",
-      condition: "unique_pct == 100% (String)",
-      severity: "LOW",
-      explanation: "Unique strings (UUIDs, transaction IDs) that would cause catastrophic target leakage or overfitting if left in features."
+      condition: "unique_pct == 100% (String/Numeric ID)",
+      severity: "LOW / HIGH for ML",
+      explanation: "Unique strings or sequential IDs (UUIDs, transaction IDs) that cause target leakage or overfitting."
     },
     {
       name: "HIGH_CARDINALITY",
       condition: "unique_pct > 50% and < 100%",
       severity: "MEDIUM",
-      explanation: "Categorical columns with too many distinct values, warning against naive one-hot encoding dimensional explosions."
+      explanation: "Categorical columns with too many distinct values, warning against naive one-hot encoding explosions."
     },
     {
       name: "TYPE_MISMATCH",
-      condition: "String col matches ≥80% numbers/dates/booleans",
+      condition: "String col matches ≥80% numbers/dates",
       severity: "HIGH (≥95%) | MEDIUM (≥80%)",
       explanation: "Ingestion artifacts where numeric or timestamp values were misinferred as strings during CSV parsing."
     },
   ]
 
   return (
-    <div style={{ maxWidth: '1100px', margin: '0 auto', paddingBottom: '3rem' }}>
+    <div style={{ maxWidth: '1000px', margin: '0 auto', paddingBottom: '3rem' }}>
       {/* Header */}
-      <div style={{ textAlign: 'center', marginBottom: '3rem' }}>
-        <span className="badge badge-cyan" style={{ marginBottom: '0.75rem' }}>
+      <div style={{ marginBottom: '2.5rem', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '1.75rem' }}>
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+          <span className="badge badge-muted">
+            Technical Architecture
+          </span>
+        </div>
+        <h1 style={{ fontSize: '2rem', fontWeight: 700, marginBottom: '0.75rem' }}>
           Hardware Budgets & Execution Specifications
-        </span>
-        <h1 style={{ fontSize: '2.5rem', fontWeight: 800, marginBottom: '1rem' }}>
-          Engine Architecture & Limits
         </h1>
-        <p style={{ color: 'var(--text-secondary)', fontSize: '1.1rem', maxWidth: '750px', margin: '0 auto', lineHeight: 1.6 }}>
-          How Clean-It achieves enterprise-grade data profiling and autonomous cleaning on a 512MB RAM free-tier budget.
+        <p style={{ color: 'var(--text-secondary)', fontSize: '1rem', lineHeight: 1.6, maxWidth: '750px' }}>
+          How Clean-It executes high-throughput data profiling and cleaning within a strict 512 MB RAM container budget.
         </p>
       </div>
 
       {/* Visual Pipeline Flow */}
-      <div className="glass-panel" style={{ padding: '2rem', marginBottom: '3rem' }}>
-        <h3 style={{ fontSize: '1.25rem', marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <Cpu size={20} color="var(--cyan-primary)" />
+      <div className="card" style={{ padding: '1.75rem', marginBottom: '2.5rem' }}>
+        <h3 style={{ fontSize: '1.1rem', fontWeight: 600, marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <Cpu size={18} color="var(--text-secondary)" />
           End-to-End Pipeline Execution Flow
         </h3>
 
-        <div className="grid-3" style={{ gap: '1rem' }}>
+        <div className="grid-3" style={{ gap: '0.75rem' }}>
           {flowSteps.map((step, sIdx) => (
             <div
               key={sIdx}
               style={{
-                background: 'rgba(255, 255, 255, 0.02)',
-                padding: '1.25rem',
-                borderRadius: 'var(--radius-md)',
+                background: 'var(--bg-subtle)',
+                padding: '1rem',
+                borderRadius: 'var(--radius-sm)',
                 border: '1px solid var(--border-subtle)',
-                position: 'relative',
               }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--cyan-primary)', marginBottom: '0.5rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--text-primary)', marginBottom: '0.35rem' }}>
                 {step.icon}
-                <span style={{ fontWeight: 700, fontSize: '0.95rem' }}>{step.title}</span>
+                <span style={{ fontWeight: 600, fontSize: '0.875rem' }}>{step.title}</span>
               </div>
-              <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', lineHeight: 1.5 }}>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '0.78rem', lineHeight: 1.5 }}>
                 {step.desc}
               </p>
             </div>
@@ -103,53 +104,43 @@ export default function InfoPage() {
       </div>
 
       {/* RAM Budget Breakdown */}
-      <div className="glass-panel" style={{ padding: '2rem', marginBottom: '3rem', border: '1px solid rgba(16, 185, 129, 0.3)' }}>
-        <h3 style={{ fontSize: '1.25rem', color: 'var(--emerald-primary)', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <HardDrive size={20} />
-          Render Free-Tier 512 MB RAM Budget Strategy
+      <div className="card" style={{ padding: '1.75rem', marginBottom: '2.5rem' }}>
+        <h3 style={{ fontSize: '1.1rem', fontWeight: 600, marginBottom: '0.35rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <HardDrive size={18} color="var(--text-secondary)" />
+          Memory Budget Allocation (512 MB Container)
         </h3>
-        <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: '1.5rem' }}>
-          Strict memory isolation ensures zero out-of-memory (OOM) crashes on 512 MB containers.
+        <p style={{ color: 'var(--text-secondary)', fontSize: '0.825rem', marginBottom: '1.25rem' }}>
+          Strict lazy evaluation ensures zero out-of-memory crashes on memory-constrained servers.
         </p>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
           <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '0.35rem' }}>
-              <span>Polars Streaming Scan & Aggregations (Peak)</span>
-              <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--cyan-primary)' }}>~300 MB (58%)</span>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', marginBottom: '0.3rem' }}>
+              <span style={{ color: 'var(--text-secondary)' }}>Polars Streaming Scan & Aggregations (Peak)</span>
+              <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>~300 MB (58%)</span>
             </div>
-            <div style={{ width: '100%', height: '8px', background: 'rgba(255, 255, 255, 0.08)', borderRadius: '4px', overflow: 'hidden' }}>
-              <div style={{ width: '58%', height: '100%', background: 'var(--cyan-primary)' }} />
+            <div style={{ width: '100%', height: '6px', background: 'var(--bg-subtle)', borderRadius: '3px', overflow: 'hidden' }}>
+              <div style={{ width: '58%', height: '100%', background: 'var(--text-secondary)' }} />
             </div>
           </div>
 
           <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '0.35rem' }}>
-              <span>FastAPI ASGI Workers & Background Tasks</span>
-              <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--violet-secondary)' }}>~100 MB (20%)</span>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', marginBottom: '0.3rem' }}>
+              <span style={{ color: 'var(--text-secondary)' }}>FastAPI ASGI Runtime & Workers</span>
+              <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>~100 MB (20%)</span>
             </div>
-            <div style={{ width: '100%', height: '8px', background: 'rgba(255, 255, 255, 0.08)', borderRadius: '4px', overflow: 'hidden' }}>
-              <div style={{ width: '20%', height: '100%', background: 'var(--violet-secondary)' }} />
-            </div>
-          </div>
-
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '0.35rem' }}>
-              <span>Scikit-Learn Baseline ML Evaluation (Optional)</span>
-              <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--emerald-primary)' }}>~80 MB (15%)</span>
-            </div>
-            <div style={{ width: '100%', height: '8px', background: 'rgba(255, 255, 255, 0.08)', borderRadius: '4px', overflow: 'hidden' }}>
-              <div style={{ width: '15%', height: '100%', background: 'var(--emerald-primary)' }} />
+            <div style={{ width: '100%', height: '6px', background: 'var(--bg-subtle)', borderRadius: '3px', overflow: 'hidden' }}>
+              <div style={{ width: '20%', height: '100%', background: 'var(--text-muted)' }} />
             </div>
           </div>
 
           <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '0.35rem' }}>
-              <span>Local LLM Weights (Never loaded locally)</span>
-              <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>0 MB (0% - Offloaded to Groq)</span>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', marginBottom: '0.3rem' }}>
+              <span style={{ color: 'var(--text-secondary)' }}>Buffer & Ingestion Overhead</span>
+              <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>~80 MB (15%)</span>
             </div>
-            <div style={{ width: '100%', height: '8px', background: 'rgba(255, 255, 255, 0.08)', borderRadius: '4px', overflow: 'hidden' }}>
-              <div style={{ width: '0%', height: '100%' }} />
+            <div style={{ width: '100%', height: '6px', background: 'var(--bg-subtle)', borderRadius: '3px', overflow: 'hidden' }}>
+              <div style={{ width: '15%', height: '100%', background: 'var(--text-dim)' }} />
             </div>
           </div>
         </div>
@@ -157,11 +148,11 @@ export default function InfoPage() {
 
       {/* The 7 Detectors Table */}
       <div>
-        <h3 style={{ fontSize: '1.35rem', marginBottom: '0.5rem' }}>
-          Phase 5 Deterministic Quality Engine Specifications
+        <h3 style={{ fontSize: '1.2rem', fontWeight: 600, marginBottom: '0.35rem' }}>
+          Deterministic Issue Detector Rules
         </h3>
-        <p style={{ color: 'var(--text-secondary)', fontSize: '0.95rem', marginBottom: '1.5rem' }}>
-          Mathematical criteria utilized by the backend rule engine without any LLM hallucination.
+        <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginBottom: '1.25rem' }}>
+          Criteria evaluated by the Polars engine on raw data without dynamic code generation.
         </p>
 
         <div className="data-table-container">
@@ -169,7 +160,7 @@ export default function InfoPage() {
             <thead>
               <tr>
                 <th>Detector</th>
-                <th>Trigger Condition</th>
+                <th>Trigger Rule</th>
                 <th>Severity Scale</th>
                 <th>Engineering Justification</th>
               </tr>
@@ -177,16 +168,16 @@ export default function InfoPage() {
             <tbody>
               {detectors.map((d, dIdx) => (
                 <tr key={dIdx}>
-                  <td style={{ fontWeight: 600, color: 'var(--cyan-primary)', fontFamily: 'var(--font-mono)', fontSize: '0.85rem' }}>
+                  <td style={{ fontWeight: 600, color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: '0.8rem' }}>
                     {d.name}
                   </td>
-                  <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem', color: 'var(--text-primary)' }}>
+                  <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
                     {d.condition}
                   </td>
-                  <td style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                  <td style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
                     {d.severity}
                   </td>
-                  <td style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                  <td style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
                     {d.explanation}
                   </td>
                 </tr>

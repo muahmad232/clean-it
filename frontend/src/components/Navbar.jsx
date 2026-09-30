@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Activity, Database, Cpu, Sparkles, BookOpen, Layers } from 'lucide-react'
+import { Activity, Database, BookOpen, Layers, Home, Sliders } from 'lucide-react'
 import { fetchHealth } from '../api'
 
 export default function Navbar({ activeTab, onSelectTab }) {
@@ -24,12 +24,13 @@ export default function Navbar({ activeTab, onSelectTab }) {
   return (
     <header className="navbar">
       <div className="navbar-container">
-        <a href="#studio" onClick={() => onSelectTab('studio')} className="brand">
+        <a href="#home" onClick={(e) => { e.preventDefault(); onSelectTab('home') }} className="brand">
           <div className="brand-icon">
-            <Sparkles size={20} />
+            <Sliders size={16} />
           </div>
           <div className="brand-text">
-            <span>CLEAN-IT</span> // DATA PIPELINE
+            Clean-It
+            <span className="brand-tag">/ Data Studio</span>
           </div>
         </a>
 
@@ -37,11 +38,20 @@ export default function Navbar({ activeTab, onSelectTab }) {
           <ul className="nav-links">
             <li>
               <button
+                className={`nav-item ${activeTab === 'home' ? 'active' : ''}`}
+                onClick={() => onSelectTab('home')}
+              >
+                <Home size={15} />
+                Home
+              </button>
+            </li>
+            <li>
+              <button
                 className={`nav-item ${activeTab === 'studio' ? 'active' : ''}`}
                 onClick={() => onSelectTab('studio')}
               >
-                <Activity size={16} />
-                Studio
+                <Sliders size={15} />
+                Data Studio
               </button>
             </li>
             <li>
@@ -49,8 +59,8 @@ export default function Navbar({ activeTab, onSelectTab }) {
                 className={`nav-item ${activeTab === 'about' ? 'active' : ''}`}
                 onClick={() => onSelectTab('about')}
               >
-                <BookOpen size={16} />
-                About
+                <BookOpen size={15} />
+                Methodology
               </button>
             </li>
             <li>
@@ -58,8 +68,8 @@ export default function Navbar({ activeTab, onSelectTab }) {
                 className={`nav-item ${activeTab === 'info' ? 'active' : ''}`}
                 onClick={() => onSelectTab('info')}
               >
-                <Layers size={16} />
-                Architecture
+                <Layers size={15} />
+                Specs
               </button>
             </li>
           </ul>
@@ -67,12 +77,10 @@ export default function Navbar({ activeTab, onSelectTab }) {
 
         <div className="status-pill">
           <span className={`pulse-dot ${isOnline ? 'online' : 'error'}`} />
-          <span style={{ fontWeight: 600 }}>
-            {isOnline ? 'API Connected' : 'Offline'}
-          </span>
-          {isOnline && health.db_status && (
-            <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '3px' }}>
-              <Database size={11} /> {health.db_status}
+          <span>{isOnline ? 'FastAPI Online' : 'Connecting'}</span>
+          {isOnline && health.db_status === 'ok' && (
+            <span style={{ color: 'var(--text-muted)', fontSize: '0.72rem' }}>
+              &bull; DB Connected
             </span>
           )}
         </div>

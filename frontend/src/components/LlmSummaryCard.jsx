@@ -1,12 +1,11 @@
 import React, { useState } from 'react'
-import { Bot, Copy, Check, Sparkles, Terminal } from 'lucide-react'
+import { Terminal, Copy, Check, ShieldCheck } from 'lucide-react'
 
 export default function LlmSummaryCard({ summary = '' }) {
   const [copied, setCopied] = useState(false)
 
   if (!summary) return null
 
-  // Rough estimation: 1 token ≈ 4 characters
   const estTokens = Math.round(summary.length / 4)
 
   const handleCopy = () => {
@@ -16,63 +15,52 @@ export default function LlmSummaryCard({ summary = '' }) {
   }
 
   return (
-    <div className="glass-panel" style={{ padding: '1.75rem', marginBottom: '2.5rem', border: '1px solid rgba(168, 85, 247, 0.3)' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', marginBottom: '1rem' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-          <div style={{
-            width: '32px',
-            height: '32px',
-            borderRadius: 'var(--radius-sm)',
-            background: 'rgba(168, 85, 247, 0.15)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: 'var(--violet-secondary)',
-          }}>
-            <Bot size={18} />
-          </div>
+    <div className="card" style={{ padding: '1.25rem', marginBottom: '1.5rem' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '0.85rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <Terminal size={16} color="var(--text-secondary)" />
           <div>
-            <h3 style={{ fontSize: '1.15rem' }}>
-              Groq LLM Prompt Context Payload
-            </h3>
-            <p style={{ color: 'var(--text-secondary)', fontSize: '0.8rem' }}>
-              Deterministic plain-English summary prepared for agentic reasoning (Phase 7).
+            <h4 style={{ fontSize: '0.95rem', fontWeight: 600 }}>
+              Statistical Fingerprint Payload
+            </h4>
+            <p style={{ color: 'var(--text-secondary)', fontSize: '0.78rem' }}>
+              Structured plain-English summary prepared for downstream reasoning.
             </p>
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          <span className="badge badge-purple" style={{ fontFamily: 'var(--font-mono)' }}>
-            ~{estTokens} Tokens (Budget &lt; 500)
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <span className="badge badge-muted" style={{ fontFamily: 'var(--font-mono)', fontSize: '0.7rem' }}>
+            ~{estTokens} tokens
           </span>
           <button
             onClick={handleCopy}
             className="btn btn-secondary btn-sm"
-            style={{ fontSize: '0.78rem' }}
+            style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem' }}
           >
-            {copied ? <Check size={14} color="var(--emerald-primary)" /> : <Copy size={14} />}
-            {copied ? 'Copied' : 'Copy Payload'}
+            {copied ? <Check size={13} color="var(--emerald-primary)" /> : <Copy size={13} />}
+            {copied ? 'Copied' : 'Copy'}
           </button>
         </div>
       </div>
 
       <div style={{
-        background: '#090d16',
-        borderRadius: 'var(--radius-md)',
-        padding: '1.25rem',
-        border: '1px solid rgba(255, 255, 255, 0.05)',
+        background: 'var(--bg-main)',
+        borderRadius: 'var(--radius-sm)',
+        padding: '1rem',
+        border: '1px solid var(--border-subtle)',
         fontFamily: 'var(--font-mono)',
-        fontSize: '0.875rem',
-        lineHeight: 1.7,
-        color: '#e2e8f0',
+        fontSize: '0.8rem',
+        lineHeight: 1.6,
+        color: 'var(--text-secondary)',
         whiteSpace: 'pre-wrap',
       }}>
         {summary}
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.75rem', color: 'var(--text-muted)', fontSize: '0.75rem' }}>
-        <Sparkles size={12} color="var(--violet-secondary)" />
-        <span>Strict Privacy Guard: Raw records never touch the Groq API. Only aggregate statistical fingerprints are transmitted.</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginTop: '0.65rem', color: 'var(--text-muted)', fontSize: '0.72rem' }}>
+        <ShieldCheck size={13} color="var(--emerald-primary)" />
+        <span>Privacy Guard: Only aggregate statistical counts are captured; zero raw rows transmitted.</span>
       </div>
     </div>
   )

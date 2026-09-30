@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { AlertCircle, Filter, ChevronDown, ChevronRight, CheckCircle2, ShieldAlert, Wrench } from 'lucide-react'
+import { AlertCircle, ChevronDown, ChevronRight, CheckCircle2, ShieldAlert, Wrench } from 'lucide-react'
 
 export default function IssuesList({ issues = [] }) {
   const [selectedSeverity, setSelectedSeverity] = useState('ALL')
@@ -16,7 +16,6 @@ export default function IssuesList({ issues = [] }) {
     setExpandedId(expandedId === id ? null : id)
   }
 
-  // Helpful tool recommendation for future Phase 9 Tool Executor
   const getSuggestedAction = (type, col) => {
     switch (type) {
       case 'DUPLICATES':
@@ -34,25 +33,25 @@ export default function IssuesList({ issues = [] }) {
       case 'TYPE_MISMATCH':
         return `Deterministic Tool: cast_type('${col}')`
       default:
-        return 'Autonomous pipeline inspection'
+        return 'Deterministic pipeline transformation'
     }
   }
 
   return (
-    <div className="glass-panel" style={{ padding: '1.75rem', marginBottom: '2.5rem' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', marginBottom: '1.25rem' }}>
+    <div className="card" style={{ padding: '1.5rem', marginBottom: '1.5rem' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '1.25rem' }}>
         <div>
-          <h3 style={{ fontSize: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <ShieldAlert size={20} color="var(--rose-primary)" />
+          <h3 style={{ fontSize: '1.1rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <ShieldAlert size={17} color="var(--amber-primary)" />
             Detected Data Quality Issues ({filteredIssues.length})
           </h3>
-          <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', marginTop: '0.2rem' }}>
-            Identified by Phase 5 deterministic rule engine with mathematical evidence.
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.825rem', marginTop: '0.15rem' }}>
+            Identified by deterministic rule engine with mathematical evidence.
           </p>
         </div>
 
         {/* Severity filter pills */}
-        <div style={{ display: 'flex', gap: '0.35rem', background: 'rgba(255, 255, 255, 0.03)', padding: '0.25rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
+        <div style={{ display: 'flex', gap: '0.25rem', background: 'var(--bg-subtle)', padding: '0.2rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-subtle)' }}>
           {severities.map(sev => {
             const count = sev === 'ALL' ? issues.length : issues.filter(i => i.severity === sev).length
             return (
@@ -60,27 +59,26 @@ export default function IssuesList({ issues = [] }) {
                 key={sev}
                 onClick={() => setSelectedSeverity(sev)}
                 style={{
-                  background: selectedSeverity === sev ? 'rgba(255, 255, 255, 0.12)' : 'transparent',
+                  background: selectedSeverity === sev ? 'var(--bg-surface-elevated)' : 'transparent',
                   color: selectedSeverity === sev ? 'var(--text-primary)' : 'var(--text-muted)',
-                  border: 'none',
+                  border: selectedSeverity === sev ? '1px solid var(--border-medium)' : '1px solid transparent',
                   borderRadius: 'var(--radius-sm)',
-                  padding: '0.35rem 0.65rem',
-                  fontSize: '0.75rem',
-                  fontWeight: 600,
+                  padding: '0.25rem 0.55rem',
+                  fontSize: '0.72rem',
+                  fontWeight: 500,
                   cursor: 'pointer',
-                  transition: 'all 0.15s ease',
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '0.35rem',
+                  gap: '0.3rem',
                 }}
               >
                 {sev}
                 <span style={{
-                  fontSize: '0.7rem',
-                  padding: '0.1rem 0.35rem',
-                  borderRadius: '9999px',
-                  background: selectedSeverity === sev ? 'rgba(0, 242, 254, 0.2)' : 'rgba(255, 255, 255, 0.05)',
-                  color: selectedSeverity === sev ? 'var(--cyan-primary)' : 'var(--text-muted)',
+                  fontSize: '0.68rem',
+                  padding: '0.05rem 0.3rem',
+                  borderRadius: '3px',
+                  background: 'var(--bg-card)',
+                  color: 'var(--text-muted)',
                 }}>
                   {count}
                 </span>
@@ -91,17 +89,17 @@ export default function IssuesList({ issues = [] }) {
       </div>
 
       {filteredIssues.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: '3rem 1rem', color: 'var(--text-muted)' }}>
-          <CheckCircle2 size={40} color="var(--emerald-primary)" style={{ margin: '0 auto 0.75rem' }} />
-          <div style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: '1.05rem' }}>
+        <div style={{ textAlign: 'center', padding: '2.5rem 1rem', color: 'var(--text-muted)' }}>
+          <CheckCircle2 size={32} color="var(--emerald-primary)" style={{ margin: '0 auto 0.5rem' }} />
+          <div style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: '0.95rem' }}>
             No issues found under {selectedSeverity} severity
           </div>
-          <p style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
-            All checked constraints passed without triggering deterministic violation rules.
+          <p style={{ fontSize: '0.8rem', marginTop: '0.2rem' }}>
+            All tested constraints passed deterministic validation rules.
           </p>
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
           {filteredIssues.map((issue, idx) => {
             const isExpanded = expandedId === (issue.id || idx)
             const sev = issue.severity || 'MEDIUM'
@@ -110,36 +108,36 @@ export default function IssuesList({ issues = [] }) {
               <div
                 key={issue.id || idx}
                 style={{
-                  background: 'rgba(255, 255, 255, 0.02)',
+                  background: 'var(--bg-subtle)',
                   border: '1px solid var(--border-subtle)',
-                  borderRadius: 'var(--radius-md)',
+                  borderRadius: 'var(--radius-sm)',
                   overflow: 'hidden',
-                  transition: 'all 0.2s ease',
                 }}
               >
                 <div
                   onClick={() => toggleExpand(issue.id || idx)}
                   style={{
-                    padding: '1rem 1.25rem',
+                    padding: '0.85rem 1rem',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'space-between',
                     cursor: 'pointer',
-                    gap: '1rem',
+                    gap: '0.75rem',
                   }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', flex: 1 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flex: 1, flexWrap: 'wrap' }}>
                     <span className={`badge severity-${sev}`}>
                       {sev}
                     </span>
 
                     <span style={{
                       fontFamily: 'var(--font-mono)',
-                      fontSize: '0.8rem',
-                      color: 'var(--cyan-primary)',
-                      background: 'rgba(0, 242, 254, 0.08)',
-                      padding: '0.2rem 0.5rem',
-                      borderRadius: '4px',
+                      fontSize: '0.75rem',
+                      color: 'var(--text-secondary)',
+                      background: 'var(--bg-card)',
+                      border: '1px solid var(--border-subtle)',
+                      padding: '0.15rem 0.45rem',
+                      borderRadius: '3px',
                     }}>
                       {issue.issue_type}
                     </span>
@@ -147,7 +145,7 @@ export default function IssuesList({ issues = [] }) {
                     {issue.column_name && (
                       <span style={{
                         color: 'var(--text-primary)',
-                        fontSize: '0.85rem',
+                        fontSize: '0.825rem',
                         fontWeight: 600,
                         fontFamily: 'var(--font-mono)',
                       }}>
@@ -155,48 +153,48 @@ export default function IssuesList({ issues = [] }) {
                       </span>
                     )}
 
-                    <span style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', flex: 1 }}>
+                    <span style={{ color: 'var(--text-secondary)', fontSize: '0.825rem', flex: 1 }}>
                       {issue.description}
                     </span>
                   </div>
 
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-                      {(issue.confidence * 100).toFixed(0)}% confidence
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                    <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                      {(issue.confidence * 100).toFixed(0)}% conf
                     </span>
-                    {isExpanded ? <ChevronDown size={18} color="var(--text-muted)" /> : <ChevronRight size={18} color="var(--text-muted)" />}
+                    {isExpanded ? <ChevronDown size={15} color="var(--text-muted)" /> : <ChevronRight size={15} color="var(--text-muted)" />}
                   </div>
                 </div>
 
                 {isExpanded && (
                   <div style={{
-                    padding: '1rem 1.25rem',
-                    background: 'rgba(0, 0, 0, 0.3)',
+                    padding: '0.85rem 1rem',
+                    background: 'var(--bg-surface)',
                     borderTop: '1px solid var(--border-subtle)',
                     display: 'flex',
                     flexDirection: 'column',
-                    gap: '0.75rem',
+                    gap: '0.65rem',
                   }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--violet-secondary)', fontSize: '0.85rem' }}>
-                      <Wrench size={15} />
-                      <span style={{ fontWeight: 600 }}>Suggested Pipeline Action:</span>
-                      <code style={{ background: 'rgba(168, 85, 247, 0.1)', padding: '0.2rem 0.5rem', borderRadius: '4px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-secondary)', fontSize: '0.8rem' }}>
+                      <Wrench size={14} color="var(--text-muted)" />
+                      <span style={{ fontWeight: 500, color: 'var(--text-primary)' }}>Recommended Tool:</span>
+                      <code style={{ background: 'var(--bg-subtle)', padding: '0.15rem 0.45rem', borderRadius: '3px', border: '1px solid var(--border-subtle)' }}>
                         {getSuggestedAction(issue.issue_type, issue.column_name)}
                       </code>
                     </div>
 
                     <div>
-                      <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: 600, marginBottom: '0.35rem' }}>
-                        Deterministic Mathematical Evidence (JSON)
+                      <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: 600, marginBottom: '0.25rem' }}>
+                        Evidence (JSON)
                       </div>
                       <pre style={{
-                        background: '#080c14',
-                        padding: '0.75rem 1rem',
+                        background: 'var(--bg-main)',
+                        padding: '0.65rem 0.85rem',
                         borderRadius: 'var(--radius-sm)',
-                        fontSize: '0.8rem',
-                        color: 'var(--cyan-secondary)',
+                        fontSize: '0.75rem',
+                        color: 'var(--text-secondary)',
                         overflowX: 'auto',
-                        border: '1px solid rgba(255, 255, 255, 0.05)',
+                        border: '1px solid var(--border-subtle)',
                       }}>
                         {JSON.stringify(issue.evidence_json || {}, null, 2)}
                       </pre>
