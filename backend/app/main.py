@@ -128,6 +128,10 @@ def create_app() -> FastAPI:
 def _register_routes(app: FastAPI) -> None:
     """Register all routers. Add new routers here as phases progress."""
 
+    # Phase 2: Projects
+    from app.routers.projects import router as projects_router
+    app.include_router(projects_router)
+
     # Phase 3: Dataset upload
     from app.routers.upload import router as upload_router, limits_router
     app.include_router(upload_router)
@@ -140,6 +144,10 @@ def _register_routes(app: FastAPI) -> None:
     # Phase 5: Basic Issue Detection
     from app.routers.issues import router as issues_router
     app.include_router(issues_router)
+
+    # Dataset Cleaning & Download
+    from app.routers.clean import router as clean_router
+    app.include_router(clean_router)
 
     @app.get(
         "/health",

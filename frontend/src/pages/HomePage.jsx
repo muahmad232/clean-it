@@ -5,6 +5,8 @@ import ProfileStats from '../components/ProfileStats'
 import IssuesList from '../components/IssuesList'
 import ColumnsExplorer from '../components/ColumnsExplorer'
 import LlmSummaryCard from '../components/LlmSummaryCard'
+import CleanActionCard from '../components/CleanActionCard'
+import RecommendedDatasets from '../components/RecommendedDatasets'
 import { getOrCreateDefaultProject, uploadDatasetFile, triggerDatasetProfile, fetchDatasetIssues } from '../api'
 
 export default function HomePage({ onNavigate }) {
@@ -15,6 +17,7 @@ export default function HomePage({ onNavigate }) {
   const [profileData, setProfileData] = useState(null)
   const [issuesData, setIssuesData] = useState([])
   const [error, setError] = useState(null)
+  const [isCleaning, setIsCleaning] = useState(false)
 
   useEffect(() => {
     async function initProject() {
@@ -25,25 +28,35 @@ export default function HomePage({ onNavigate }) {
   }, [])
 
   const handleUploadAndProfile = async (file, taskType) => {
-    if (!project) return
     setIsUploading(true)
     setError(null)
-    setUploadProgress(`Uploading ${file.name}...`)
+    setUploadProgress(`Connecting workspace...`)
 
     try {
+      // 0. Ensure we have an active, verified project from the database
+      let currentProject = project
+      if (!currentProject || !currentProject.id || currentProject.id === '00000000-0000-0000-0000-000000000001') {
+        currentProject = await getOrCreateDefaultProject()
+        setProject(currentProject)
+      }
+
+      setUploadProgress(`Uploading ${file.name}...`)
+
       // 1. Upload to FastAPI -> Supabase Storage
-      const uploadResult = await uploadDatasetFile(project.id, file, taskType)
+      const uploadResult = await uploadDatasetFile(currentProject.id, file, taskType)
       const dataset = uploadResult.dataset
       setActiveDataset(dataset)
 
+      const effectiveProjectId = dataset.project_id || currentProject.id
+
       // 2. Trigger Polars Deterministic Profiling
       setUploadProgress('Running Polars streaming profiler...')
-      const profileResult = await triggerDatasetProfile(project.id, dataset.id)
+      const profileResult = await triggerDatasetProfile(effectiveProjectId, dataset.id)
       setProfileData(profileResult.profile)
 
       // 3. Fetch structured issues from Phase 5 detector
       setUploadProgress('Evaluating deterministic data quality rules...')
-      const issuesResult = await fetchDatasetIssues(project.id, dataset.id)
+      const issuesResult = await fetchDatasetIssues(effectiveProjectId, dataset.id)
       setIssuesData(issuesResult.issues || [])
 
       setUploadProgress('')
@@ -128,13 +141,13 @@ export default function HomePage({ onNavigate }) {
       {/* Upload Zone */}
       <UploadZone
         onUploadComplete={handleUploadAndProfile}
-        isUploading={isUploading}
+        isUploading={isUploading || isCleaning}
         uploadProgress={uploadProgress}
       />
 
       {/* Results View */}
       {profileData && (
-        <div>
+        <div style={{ marginBottom: '3rem' }}>
           {/* Header Action Bar */}
           <div style={{
             display: 'flex',
@@ -169,6 +182,15 @@ export default function HomePage({ onNavigate }) {
             </button>
           </div>
 
+          {/* Task-Aware Cleaning & Download Action Card */}
+          <CleanActionCard
+            dataset={activeDataset}
+            projectId={activeDataset?.project_id || project?.id}
+            profile={profileData}
+            isCleaning={isCleaning}
+            setIsCleaning={setIsCleaning}
+          />
+
           {/* Metric Stats Cards */}
           <ProfileStats profile={profileData} issues={issuesData} />
 
@@ -182,6 +204,12 @@ export default function HomePage({ onNavigate }) {
           <ColumnsExplorer columns={profileData.columns || []} />
         </div>
       )}
+
+      {/* Recommended Benchmark Dirty Datasets */}
+      <RecommendedDatasets
+        onSelectDataset={handleUploadAndProfile}
+        isUploading={isUploading || isCleaning}
+      />
     </div>
   )
 }

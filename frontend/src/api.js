@@ -32,19 +32,59 @@ export async function fetchLimits() {
 }
 
 /**
- * Creates or retrieves a default working project for dataset uploads.
+ * Creates or retrieves a valid project from the backend for dataset uploads.
  */
 export async function getOrCreateDefaultProject() {
-  // If already stored in localStorage, use it
   const cachedId = localStorage.getItem('cleanit_project_id')
-  if (cachedId) {
-    return { id: cachedId, name: 'Default Data Studio' }
+
+  // 1. Verify if cached project actually exists in database
+  if (cachedId && cachedId !== '00000000-0000-0000-0000-000000000001') {
+    try {
+      const checkRes = await fetch(`${API_BASE}/api/v1/projects/${cachedId}`)
+      if (checkRes.ok) {
+        const data = await checkRes.json()
+        if (data.project) return data.project
+      }
+    } catch {
+      // Fall through to list/create
+    }
   }
 
-  // Generate a client session UUID for anonymous workspace
-  const newId = '00000000-0000-0000-0000-000000000001'
-  localStorage.setItem('cleanit_project_id', newId)
-  return { id: newId, name: 'Default Data Studio' }
+  // 2. Fetch existing projects
+  try {
+    const listRes = await fetch(`${API_BASE}/api/v1/projects`)
+    if (listRes.ok) {
+      const listData = await listRes.json()
+      if (listData.projects && listData.projects.length > 0) {
+        const existing = listData.projects[0]
+        localStorage.setItem('cleanit_project_id', existing.id)
+        return existing
+      }
+    }
+
+    // 3. None exist yet — create a new project record in Supabase
+    const createRes = await fetch(`${API_BASE}/api/v1/projects`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Default Data Studio',
+        description: 'Interactive data cleaning workspace',
+      }),
+    })
+
+    if (createRes.ok) {
+      const createData = await createRes.json()
+      if (createData.project) {
+        localStorage.setItem('cleanit_project_id', createData.project.id)
+        return createData.project
+      }
+    }
+  } catch (err) {
+    console.error('Error establishing project container:', err)
+  }
+
+  // Fallback
+  return { id: cachedId, name: 'Default Data Studio' }
 }
 
 /**
@@ -107,4 +147,33 @@ export async function fetchDatasetIssues(projectId, datasetId, { severity, issue
   }
 
   return await res.json()
+}
+
+/**
+ * Triggers task-aware dataset cleaning.
+ */
+export async function cleanDataset(projectId, datasetId, taskType = 'GENERAL', targetColumn = null) {
+  const params = new URLSearchParams()
+  if (taskType) params.append('task_type', taskType)
+  if (targetColumn) params.append('target_column', targetColumn)
+
+  const url = `${API_BASE}/api/v1/projects/${projectId}/datasets/${datasetId}/clean?${params.toString()}`
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  })
+
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({}))
+    throw new Error(errBody.detail?.message || `Cleaning failed with status ${res.status}`)
+  }
+
+  return await res.json()
+}
+
+/**
+ * Returns direct download URL for dataset.
+ */
+export function getDownloadUrl(projectId, datasetId) {
+  return `${API_BASE}/api/v1/projects/${projectId}/datasets/${datasetId}/download`
 }
