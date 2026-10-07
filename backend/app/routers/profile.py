@@ -174,7 +174,7 @@ def get_profile(project_id: str, dataset_id: str):
         )
 
     profile_json = dataset.get("profile_json")
-    if not profile_json:
+    if not profile_json or "shape" not in profile_json:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={

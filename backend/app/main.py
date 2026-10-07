@@ -158,6 +158,10 @@ def _register_routes(app: FastAPI) -> None:
     from app.routers.llm import router as llm_router
     app.include_router(llm_router)
 
+    # Phase 11: Dataset Versioning & Rollback
+    from app.routers.versions import router as versions_router
+    app.include_router(versions_router)
+
     @app.get(
         "/health",
         tags=["System"],

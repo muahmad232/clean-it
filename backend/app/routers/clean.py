@@ -121,12 +121,36 @@ def clean_project_dataset(
     except Exception as exc:
         logger.warning(f"Could not persist cleaning report to DB: {exc}")
 
+    # 4b. Snapshot new immutable dataset version (Phase 11)
+    new_version = None
+    try:
+        from app.services.versioning import create_dataset_version
+        clean_shape = report.get("cleaned_shape", {})
+        new_version = create_dataset_version(
+            dataset_id=dataset_id,
+            project_id=project_id,
+            file_bytes=cleaned_bytes,
+            file_type="csv",
+            action_name="Instant Deterministic Clean (Polars)",
+            action_details={"transformations": report.get("transformations", [])},
+            metrics={
+                "rows": clean_shape.get("rows", 0),
+                "columns": clean_shape.get("columns", 0),
+                "null_cells_remaining": report.get("null_cells_remaining", 0),
+                "duplicate_rows_removed": report.get("duplicate_rows_removed", 0),
+                "transformations_applied": report.get("total_transformations_applied", 0),
+            },
+        )
+    except Exception as exc:
+        logger.warning(f"Could not snapshot version for cleaned dataset {dataset_id}: {exc}")
+
     return {
         "dataset_id": dataset_id,
         "status": "CLEANED",
         "task_type": effective_task,
         "target_column": effective_target,
         "report": report,
+        "version": new_version,
         "download_url": f"/api/v1/projects/{project_id}/datasets/{dataset_id}/download",
     }
 
@@ -263,6 +287,47 @@ def clean_project_dataset_agentic(
     except Exception as exc:
         logger.warning(f"Could not persist agent cleaning report to DB: {exc}")
 
+    # 4b. Snapshot new immutable dataset version (Phase 11)
+    new_version = None
+    try:
+        from app.services.versioning import create_dataset_version
+        shape = final_profile.get("shape", {})
+        total_iters = run_result.get("total_iterations", 1)
+        all_actions = [
+            a.get("action_type")
+            for step in run_result.get("steps", [])
+            for a in step.get("selected_actions", [])
+        ]
+        quality_score = run_result.get("final_metrics", {}).get("readiness_score")
+        new_version = create_dataset_version(
+            dataset_id=dataset_id,
+            project_id=project_id,
+            file_bytes=cleaned_bytes,
+            file_type="csv",
+            action_name=f"Autonomous AI Agent Loop ({total_iters} cycle{'s' if total_iters != 1 else ''})",
+            action_details={
+                "iterations": total_iters,
+                "actions": all_actions,
+                "health_grade": run_result.get("final_metrics", {}).get("health_grade"),
+                "issues_resolved": run_result.get("issues_resolved", 0),
+            },
+            metrics={
+                "rows": shape.get("rows", 0),
+                "columns": shape.get("columns", 0),
+                "total_null_pct": final_profile.get("total_null_pct", 0.0),
+                "duplicate_row_count": final_profile.get("duplicate_row_count", 0),
+                "iterations_run": total_iters,
+                "quality_score": quality_score,
+            },
+            quality_score=float(quality_score) if quality_score is not None else None,
+        )
+        logger.info(
+            f"Successfully snapshotted version v{new_version.get('version_number')} "
+            f"for autonomous agent cleaned dataset {dataset_id}"
+        )
+    except Exception as exc:
+        logger.warning(f"Could not snapshot version for agent-cleaned dataset {dataset_id}: {exc}", exc_info=True)
+
     return {
         "dataset_id": dataset_id,
         "status": "CLEANED",
@@ -270,6 +335,7 @@ def clean_project_dataset_agentic(
         "target_column": effective_target,
         "report": run_result,
         "final_profile": final_profile,
+        "version": new_version,
         "download_url": f"/api/v1/projects/{project_id}/datasets/{dataset_id}/download",
     }
 

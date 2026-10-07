@@ -198,6 +198,37 @@ code, pre {
   border-radius: var(--radius-sm);
 }
 
+.btn-xs {
+  font-size: 0.72rem;
+  padding: 0.25rem 0.55rem;
+  border-radius: var(--radius-sm);
+}
+
+.btn-danger {
+  background: var(--rose-bg);
+  color: #fca5a5;
+  border: 1px solid var(--rose-border);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: rgba(239, 68, 68, 0.45);
+  color: #fee2e2;
+}
+
+.btn-danger-solid {
+  background: var(--rose-primary);
+  color: #ffffff;
+  font-weight: 600;
+  border: 1px solid var(--rose-primary);
+}
+
+.btn-danger-solid:hover:not(:disabled) {
+  background: #dc2626;
+  border-color: #dc2626;
+  color: #ffffff;
+}
+
 /* Badges & Pills */
 .badge {
   display: inline-flex;

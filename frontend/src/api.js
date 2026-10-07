@@ -420,4 +420,55 @@ export async function runAgenticCleaning(projectId, datasetId, taskType = 'GENER
   return await res.json()
 }
 
+/**
+ * Phase 11: Dataset Versioning & Rollback
+ */
+
+export async function fetchDatasetVersions(projectId, datasetId) {
+  const url = projectId
+    ? `${API_BASE}/api/v1/projects/${projectId}/datasets/${datasetId}/versions`
+    : `${API_BASE}/api/v1/datasets/${datasetId}/versions`
+
+  const res = await fetch(url, {
+    headers: getAuthHeaders(),
+  })
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({}))
+    throw new Error(errBody.detail?.message || errBody.detail?.error || `Failed to fetch versions (HTTP ${res.status})`)
+  }
+  return await res.json()
+}
+
+export async function rollbackDatasetVersion(projectId, datasetId, targetVersionId = null, reason = 'User requested rollback') {
+  const url = projectId
+    ? `${API_BASE}/api/v1/projects/${projectId}/datasets/${datasetId}/rollback`
+    : `${API_BASE}/api/v1/datasets/${datasetId}/rollback`
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...getAuthHeaders(),
+    },
+    body: JSON.stringify({
+      target_version_id: targetVersionId,
+      reason: reason,
+    }),
+  })
+
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({}))
+    throw new Error(errBody.detail?.message || errBody.detail?.error || `Rollback rejected (HTTP ${res.status})`)
+  }
+  return await res.json()
+}
+
+export function getVersionDownloadUrl(projectId, datasetId, versionNumber, format = 'csv') {
+  if (projectId) {
+    return `${API_BASE}/api/v1/projects/${projectId}/datasets/${datasetId}/versions/${versionNumber}/download?format=${format}`
+  }
+  return `${API_BASE}/api/v1/datasets/${datasetId}/versions/${versionNumber}/download?format=${format}`
+}
+
+
 

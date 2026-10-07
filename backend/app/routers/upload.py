@@ -47,6 +47,7 @@ from app.database.repositories.datasets import (
     claim_project,
     update_dataset_profile,
 )
+from app.services.versioning import create_dataset_version
 from app.models.dataset import DatasetCreate
 
 logger = get_logger(__name__)
@@ -199,6 +200,23 @@ async def upload_dataset(
         f"Dataset uploaded successfully: id={dataset_id} "
         f"file={meta.original_filename!r} size={meta.file_size:,}B"
     )
+
+    # ── 7. Snapshot Immutable v0 Version ──────────────────────────
+    try:
+        create_dataset_version(
+            dataset_id=dataset_id,
+            project_id=project_id,
+            file_bytes=file_bytes,
+            file_type=meta.extension,
+            action_name="Initial Dataset Ingest (v0 Original)",
+            metrics={
+                "rows": meta.estimated_row_count or 0,
+                "columns": meta.column_count or 0,
+                "total_null_pct": 0.0,
+            },
+        )
+    except Exception as exc:
+        logger.warning(f"Could not snapshot v0 for uploaded dataset {dataset_id}: {exc}")
 
     return JSONResponse(
         status_code=status.HTTP_201_CREATED,
@@ -401,6 +419,24 @@ def add_sample_dataset(
         save_issues(dataset_id, issue_objs)
     except Exception as exc:
         logger.warning(f"Could not auto-profile sample dataset {dataset_id}: {exc}")
+
+    # Snapshot Immutable v0 Version
+    try:
+        from app.services.versioning import create_dataset_version
+        create_dataset_version(
+            dataset_id=dataset_id,
+            project_id=project_id,
+            file_bytes=file_bytes,
+            file_type="csv",
+            action_name=f"Initial Benchmark Ingest ({sample_key}) (v0 Original)",
+            metrics={
+                "rows": meta.estimated_row_count or 0,
+                "columns": meta.column_count or 0,
+                "total_null_pct": profile_dict.get("summary", {}).get("total_null_percentage", 0.0) if 'profile_dict' in locals() else 0.0,
+            },
+        )
+    except Exception as exc:
+        logger.warning(f"Could not snapshot v0 for sample dataset {dataset_id}: {exc}")
 
     return {
         "dataset": record,

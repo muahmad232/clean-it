@@ -50,7 +50,8 @@ def get_project_dataset_issues(
             detail={"error": "dataset_not_found", "message": f"Dataset '{dataset_id}' not found."},
         )
 
-    if not dataset.get("profile_json") and dataset.get("status") != "COMPLETED":
+    profile_json = dataset.get("profile_json") or {}
+    if ("shape" not in profile_json) and dataset.get("status") != "COMPLETED":
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={

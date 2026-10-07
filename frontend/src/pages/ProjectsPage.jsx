@@ -28,6 +28,7 @@ import {
   getDownloadUrl,
   addSampleDataset
 } from '../api'
+import DeleteConfirmModal from '../components/DeleteConfirmModal'
 
 const BENCHMARK_SAMPLES = [
   {
@@ -119,38 +120,58 @@ export default function ProjectsPage({
     }
   }
 
-  const handleDeleteDataset = async (dataset) => {
-    if (!window.confirm(`Permanently delete dataset "${dataset.original_filename}"? This will remove its files from storage.`)) {
-      return
-    }
-    setDeletingId(dataset.id)
+  // Card-based Deletion Modal State (replaces browser confirm)
+  const [datasetToDelete, setDatasetToDelete] = useState(null)
+  const [projectToDelete, setProjectToDelete] = useState(null)
+  const [isDeletingAction, setIsDeletingAction] = useState(false)
+  const [deleteModalError, setDeleteModalError] = useState(null)
+
+  const onRequestDeleteDataset = (dataset) => {
+    setDeleteModalError(null)
+    setDatasetToDelete(dataset)
+  }
+
+  const handleConfirmDeleteDataset = async () => {
+    if (!datasetToDelete) return
+    setIsDeletingAction(true)
+    setDeleteModalError(null)
     try {
-      await deleteDataset(dataset.project_id, dataset.id)
-      setDatasets(prev => prev.filter(d => d.id !== dataset.id))
-      setSuccessBanner(`Dataset "${dataset.original_filename}" deleted.`)
-      setTimeout(() => setSuccessBanner(null), 3000)
+      await deleteDataset(datasetToDelete.project_id, datasetToDelete.id)
+      setDatasets(prev => prev.filter(d => d.id !== datasetToDelete.id))
+      const filename = datasetToDelete.original_filename
+      setDatasetToDelete(null)
+      setSuccessBanner(`Dataset "${filename}" was permanently deleted.`)
+      setTimeout(() => setSuccessBanner(null), 3500)
     } catch (err) {
-      alert(`Could not delete dataset: ${err.message}`)
+      console.error('Failed to delete dataset:', err)
+      setDeleteModalError(err.message || 'Failed to delete dataset. Please try again.')
     } finally {
-      setDeletingId(null)
+      setIsDeletingAction(false)
     }
   }
 
-  const handleDeleteProject = async (proj) => {
-    if (!window.confirm(`Delete project "${proj.name}"? This will permanently delete ALL datasets within it.`)) {
-      return
-    }
-    setDeletingId(proj.id)
+  const onRequestDeleteProject = (proj) => {
+    setDeleteModalError(null)
+    setProjectToDelete(proj)
+  }
+
+  const handleConfirmDeleteProject = async () => {
+    if (!projectToDelete) return
+    setIsDeletingAction(true)
+    setDeleteModalError(null)
     try {
-      await deleteProject(proj.id)
-      setProjects(prev => prev.filter(p => p.id !== proj.id))
-      setDatasets(prev => prev.filter(d => d.project_id !== proj.id))
-      setSuccessBanner(`Project "${proj.name}" deleted.`)
-      setTimeout(() => setSuccessBanner(null), 3000)
+      await deleteProject(projectToDelete.id)
+      setProjects(prev => prev.filter(p => p.id !== projectToDelete.id))
+      setDatasets(prev => prev.filter(d => d.project_id !== projectToDelete.id))
+      const projName = projectToDelete.name
+      setProjectToDelete(null)
+      setSuccessBanner(`Project "${projName}" and its datasets were permanently deleted.`)
+      setTimeout(() => setSuccessBanner(null), 3500)
     } catch (err) {
-      alert(`Could not delete project: ${err.message}`)
+      console.error('Failed to delete project:', err)
+      setDeleteModalError(err.message || 'Failed to delete project. Please try again.')
     } finally {
-      setDeletingId(null)
+      setIsDeletingAction(false)
     }
   }
 
@@ -479,13 +500,17 @@ export default function ProjectsPage({
                     )}
 
                     <button
-                      onClick={() => handleDeleteDataset(d)}
-                      disabled={isDeleting}
+                      onClick={() => onRequestDeleteDataset(d)}
+                      disabled={isDeletingAction && datasetToDelete?.id === d.id}
                       className="btn btn-ghost btn-sm"
                       title="Delete dataset permanently"
                       style={{ color: 'var(--rose-primary)' }}
                     >
-                      {isDeleting ? <Loader2 size={14} className="spin" /> : <Trash2 size={14} />}
+                      {isDeletingAction && datasetToDelete?.id === d.id ? (
+                        <Loader2 size={14} className="spin" />
+                      ) : (
+                        <Trash2 size={14} />
+                      )}
                     </button>
                   </div>
                 </div>
@@ -568,13 +593,17 @@ export default function ProjectsPage({
                       </button>
 
                       <button
-                        onClick={() => handleDeleteProject(p)}
-                        disabled={isDeleting}
+                        onClick={() => onRequestDeleteProject(p)}
+                        disabled={isDeletingAction && projectToDelete?.id === p.id}
                         className="btn btn-ghost btn-sm"
                         style={{ color: 'var(--rose-primary)' }}
                         title="Delete project workspace"
                       >
-                        {isDeleting ? <Loader2 size={13} className="spin" /> : <Trash2 size={13} />}
+                        {isDeletingAction && projectToDelete?.id === p.id ? (
+                          <Loader2 size={13} className="spin" />
+                        ) : (
+                          <Trash2 size={13} />
+                        )}
                       </button>
                     </div>
                   </div>
@@ -657,12 +686,17 @@ export default function ProjectsPage({
                                 </a>
                               )}
                               <button
-                                onClick={() => handleDeleteDataset(d)}
-                                disabled={deletingId === d.id}
+                                onClick={() => onRequestDeleteDataset(d)}
+                                disabled={isDeletingAction && datasetToDelete?.id === d.id}
                                 className="btn btn-ghost btn-xs"
                                 style={{ color: 'var(--rose-primary)' }}
+                                title="Delete dataset permanently"
                               >
-                                <Trash2 size={12} />
+                                {isDeletingAction && datasetToDelete?.id === d.id ? (
+                                  <Loader2 size={12} className="spin" />
+                                ) : (
+                                  <Trash2 size={12} />
+                                )}
                               </button>
                             </div>
                           </div>
@@ -816,6 +850,51 @@ export default function ProjectsPage({
           </div>
         </div>
       )}
+
+      {/* Delete Dataset Confirmation Modal Card (Theme aligned) */}
+      <DeleteConfirmModal
+        isOpen={!!datasetToDelete}
+        onClose={() => {
+          if (!isDeletingAction) {
+            setDatasetToDelete(null)
+            setDeleteModalError(null)
+          }
+        }}
+        onConfirm={handleConfirmDeleteDataset}
+        title="Permanently Delete Dataset"
+        itemType="dataset"
+        itemName={datasetToDelete?.original_filename}
+        itemDetails={datasetToDelete ? {
+          projectName: projects.find(p => p.id === datasetToDelete.project_id)?.name || 'Default Workspace',
+          rows: datasetToDelete.row_count,
+          cols: datasetToDelete.column_count,
+          status: datasetToDelete.status,
+          retentionText: datasetToDelete.days_remaining !== undefined
+            ? (datasetToDelete.days_remaining > 0 ? `${datasetToDelete.days_remaining}d retention remaining` : `${datasetToDelete.hours_remaining}h retention remaining`)
+            : null,
+        } : null}
+        warningMessage="This will permanently delete this dataset, including its original upload, cleaned states, profile metadata, and all version lineage snapshots from storage. This action cannot be reversed."
+        isDeleting={isDeletingAction}
+        error={deleteModalError}
+      />
+
+      {/* Delete Project Confirmation Modal Card (Theme aligned) */}
+      <DeleteConfirmModal
+        isOpen={!!projectToDelete}
+        onClose={() => {
+          if (!isDeletingAction) {
+            setProjectToDelete(null)
+            setDeleteModalError(null)
+          }
+        }}
+        onConfirm={handleConfirmDeleteProject}
+        title="Delete Project Workspace"
+        itemType="project"
+        itemName={projectToDelete?.name}
+        warningMessage="This will permanently delete this project workspace and all uploaded datasets, versions, and cleaned files stored within it."
+        isDeleting={isDeletingAction}
+        error={deleteModalError}
+      />
     </div>
   )
 }

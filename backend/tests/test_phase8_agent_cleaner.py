@@ -158,23 +158,37 @@ def test_run_agentic_cleaning_cycle_with_mock_llm():
 
 
 def test_agent_clean_endpoint_mocked():
+    mock_ds_val = {
+        "id": "ds-456",
+        "project_id": "proj-123",
+        "storage_path": "datasets/test.csv",
+        "original_filename": "test.csv",
+        "file_type": "csv",
+        "task_type": "CLASSIFICATION",
+        "profile_json": {
+            "versions": [
+                {
+                    "id": "v0-uuid",
+                    "dataset_id": "ds-456",
+                    "version_number": 0,
+                    "created_by_action": "Initial Ingest (v0 Original)",
+                    "is_current": True,
+                }
+            ]
+        },
+    }
+
     with patch("app.routers.clean.get_project") as mock_get_proj, \
-         patch("app.routers.clean.get_dataset") as mock_get_ds, \
+         patch("app.routers.clean.get_dataset", return_value=mock_ds_val), \
+         patch("app.database.repositories.versions.get_dataset", return_value=mock_ds_val), \
          patch("app.routers.clean.download_file") as mock_dl, \
-         patch("app.routers.clean.upload_file") as mock_ul, \
+         patch("app.routers.clean.upload_file"), \
          patch("app.routers.clean.update_dataset_profile"), \
          patch("app.routers.clean.get_service_client"), \
-         patch("app.services.agent_cleaner.get_llm_provider") as mock_get_provider:
+         patch("app.services.agent_cleaner.get_llm_provider") as mock_get_provider, \
+         patch("app.services.versioning.upload_file"):
 
         mock_get_proj.return_value = {"id": "proj-123", "name": "Test Proj"}
-        mock_get_ds.return_value = {
-            "id": "ds-456",
-            "project_id": "proj-123",
-            "storage_path": "datasets/test.csv",
-            "original_filename": "test.csv",
-            "file_type": "csv",
-            "task_type": "CLASSIFICATION",
-        }
         mock_dl.return_value = b"id,val\n1,10.0\n2,20.0\n"
 
         mock_provider = MagicMock()
@@ -195,4 +209,63 @@ def test_agent_clean_endpoint_mocked():
         assert "report" in data
         assert data["report"]["total_iterations"] == 1
         assert "download_url" in data
+        assert data["version"] is not None
+        assert "Autonomous AI Agent Loop" in data["version"]["created_by_action"]
+        assert data["version"]["version_number"] == 1
+
+
+def test_agent_clean_direct_endpoint_creates_version():
+    """Verify that direct route /api/v1/datasets/{d_id}/agent-clean also creates immutable version snapshot."""
+    mock_ds_direct = {
+        "id": "ds-888",
+        "project_id": "proj-999",
+        "storage_path": "datasets/test.csv",
+        "original_filename": "test.csv",
+        "file_type": "csv",
+        "task_type": "GENERAL",
+        "profile_json": {
+            "versions": [
+                {
+                    "id": "v0-uuid-888",
+                    "dataset_id": "ds-888",
+                    "version_number": 0,
+                    "created_by_action": "Initial Ingest (v0 Original)",
+                    "is_current": True,
+                }
+            ]
+        },
+    }
+
+    with patch("app.routers.clean.get_project") as mock_get_proj, \
+         patch("app.routers.clean.get_dataset", return_value=mock_ds_direct), \
+         patch("app.database.repositories.versions.get_dataset", return_value=mock_ds_direct), \
+         patch("app.routers.clean.download_file") as mock_dl, \
+         patch("app.routers.clean.upload_file"), \
+         patch("app.routers.clean.update_dataset_profile"), \
+         patch("app.routers.clean.get_service_client"), \
+         patch("app.services.agent_cleaner.get_llm_provider") as mock_get_provider, \
+         patch("app.services.versioning.upload_file"):
+
+        mock_get_proj.return_value = {"id": "proj-999", "name": "Direct Proj"}
+        mock_dl.return_value = b"col1,col2\n1,10.0\n2,20.0\n"
+
+        mock_provider = MagicMock()
+        mock_provider.generate_structured.return_value = AgentIterationDecision(
+            current_health_grade="A",
+            readiness_score=95,
+            assessment="Cleaned by agent.",
+            is_dataset_clean=True,
+            stopping_reason="Verified clean.",
+            selected_actions=[],
+        )
+        mock_get_provider.return_value = mock_provider
+
+        res = client.post("/api/v1/datasets/ds-888/agent-clean")
+        assert res.status_code == 200
+        data = res.json()
+        assert data["status"] == "CLEANED"
+        assert data["version"] is not None
+        assert "Autonomous AI Agent Loop" in data["version"]["created_by_action"]
+        assert data["version"]["version_number"] == 1
+
 
