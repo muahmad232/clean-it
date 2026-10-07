@@ -162,6 +162,10 @@ def _register_routes(app: FastAPI) -> None:
     from app.routers.versions import router as versions_router
     app.include_router(versions_router)
 
+    # Phase 12: Human Approval System
+    from app.routers.approvals import router as approvals_router
+    app.include_router(approvals_router)
+
     @app.get(
         "/health",
         tags=["System"],

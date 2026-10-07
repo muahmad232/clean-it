@@ -191,14 +191,15 @@ def clean_project_dataset_agentic(
     task_type: Optional[str] = Query(default=None, description="Task type override (CLASSIFICATION, REGRESSION, etc.)"),
     target_column: Optional[str] = Query(default=None, description="Target column to protect"),
     max_iterations: int = Query(default=3, ge=1, le=5, description="Maximum agentic iteration cycles"),
+    require_approval: bool = Query(default=True, description="Pause and require human sign-off for HIGH-risk actions"),
 ):
     """
     Execute an autonomous multi-step cleaning loop:
     1. Profile dataset state.
     2. LLM diagnoses defects and selects precise cleaning functions.
-    3. Polars executes the functions deterministically.
+    3. Polars executes the functions deterministically (pauses if HIGH-risk requires human sign-off).
     4. Dataset is re-profiled and re-analyzed.
-    5. Repeats until clean or max_iterations reached.
+    5. Repeats until clean, waiting for approval, or max_iterations reached.
     """
     project = get_project(project_id)
     if not project:
@@ -244,6 +245,8 @@ def clean_project_dataset_agentic(
             task_type=effective_task,
             target_column=effective_target,
             max_iterations=max_iterations,
+            project_id=project_id,
+            require_approval=require_approval,
         )
     except Exception as exc:
         logger.exception(f"Agent cleaning cycle failed on dataset {dataset_id}: {exc}")
@@ -255,7 +258,35 @@ def clean_project_dataset_agentic(
     cleaned_bytes = run_result.pop("cleaned_bytes")
     final_profile = run_result.pop("final_profile")
 
-    # 3. Upload final cleaned CSV to storage
+    effective_status = run_result.get("status", "CLEANED")
+    pending_apprs = run_result.get("pending_approvals", [])
+
+    # If the cycle paused for human approval, DO NOT create or upload a cleaned dataset or version!
+    if effective_status == "WAITING_APPROVAL":
+        profile_json = dataset.get("profile_json") or {}
+        profile_json["agent_cleaning_report"] = run_result
+        profile_json["pending_safe_actions"] = run_result.get("pending_safe_actions", [])
+        try:
+            update_dataset_profile(dataset_id, profile_json)
+            client = get_service_client()
+            client.schema("data_agent").table("datasets").update({"status": "WAITING_APPROVAL"}).eq("id", dataset_id).execute()
+        except Exception as exc:
+            logger.warning(f"Could not persist agent cleaning report to DB: {exc}")
+
+        return {
+            "dataset_id": dataset_id,
+            "status": "WAITING_APPROVAL",
+            "task_type": effective_task,
+            "target_column": effective_target,
+            "report": run_result,
+            "final_profile": dataset.get("profile_json") or {},
+            "version": None,
+            "pending_approvals": pending_apprs,
+            "pending_safe_actions": run_result.get("pending_safe_actions", []),
+            "download_url": f"/api/v1/projects/{project_id}/datasets/{dataset_id}/download",
+        }
+
+    # 3. Upload final cleaned CSV to storage (only when fully cleaned and authorized)
     cleaned_path = f"datasets/cleaned/{project_id}/{dataset_id}/cleaned_{dataset.get('original_filename', 'data.csv')}"
     try:
         upload_file(cleaned_path, cleaned_bytes, content_type="text/csv")
@@ -266,7 +297,6 @@ def clean_project_dataset_agentic(
     profile_json = dataset.get("profile_json") or {}
     profile_json["agent_cleaning_report"] = run_result
     profile_json["cleaned_storage_path"] = cleaned_path
-    # Also update main profile to reflect the newly cleaned dataset state!
     profile_json["shape"] = final_profile.get("shape", profile_json.get("shape"))
     profile_json["total_null_pct"] = final_profile.get("total_null_pct", 0.0)
     profile_json["duplicate_row_count"] = final_profile.get("duplicate_row_count", 0)
@@ -276,7 +306,7 @@ def clean_project_dataset_agentic(
 
     try:
         update_dataset_profile(dataset_id, profile_json)
-        update_data = {"status": "COMPLETED"}
+        update_data = {"status": effective_status}
         if target_column:
             update_data["target_column"] = target_column
         if task_type:
@@ -310,6 +340,8 @@ def clean_project_dataset_agentic(
                 "actions": all_actions,
                 "health_grade": run_result.get("final_metrics", {}).get("health_grade"),
                 "issues_resolved": run_result.get("issues_resolved", 0),
+                "status": effective_status,
+                "pending_approvals_count": 0,
             },
             metrics={
                 "rows": shape.get("rows", 0),
@@ -330,12 +362,13 @@ def clean_project_dataset_agentic(
 
     return {
         "dataset_id": dataset_id,
-        "status": "CLEANED",
+        "status": effective_status,
         "task_type": effective_task,
         "target_column": effective_target,
         "report": run_result,
         "final_profile": final_profile,
         "version": new_version,
+        "pending_approvals": pending_apprs,
         "download_url": f"/api/v1/projects/{project_id}/datasets/{dataset_id}/download",
     }
 
@@ -350,6 +383,7 @@ def clean_direct_dataset_agentic(
     task_type: Optional[str] = Query(default=None),
     target_column: Optional[str] = Query(default=None),
     max_iterations: int = Query(default=3, ge=1, le=5),
+    require_approval: bool = Query(default=True),
 ):
     """Direct route for agentic cleaning without project_id in URL."""
     dataset = get_dataset(dataset_id)
@@ -364,6 +398,7 @@ def clean_direct_dataset_agentic(
         task_type=task_type,
         target_column=target_column,
         max_iterations=max_iterations,
+        require_approval=require_approval,
     )
 
 

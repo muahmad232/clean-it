@@ -305,6 +305,8 @@ def run_agentic_cleaning_cycle(
     task_type: str = "GENERAL",
     target_column: Optional[str] = None,
     max_iterations: int = 3,
+    project_id: Optional[str] = None,
+    require_approval: bool = True,
 ) -> dict[str, Any]:
     """
     Execute an autonomous, multi-step agentic cleaning loop:
@@ -423,10 +425,60 @@ def run_agentic_cleaning_cycle(
             steps_history.append(step_record)
             break
 
-        # 4. Execute Selected Actions via Polars
+        # 4. Check Risk Level and Approval Policy (Phase 12)
+        has_pending_approval = False
+        pending_approvals = []
+        executed_actions = []
+
+        for action_plan in decision.selected_actions:
+            from app.services.approvals import classify_action_risk, register_pending_approval
+            risk_level, needs_approval = classify_action_risk(
+                action_plan.action_type,
+                action_plan.parameters,
+                action_plan.target_columns,
+            )
+            if require_approval and needs_approval:
+                logger.info(
+                    f"Action '{action_plan.action_type}' requires human sign-off ({risk_level} risk). "
+                    f"Registering pending approval for dataset {dataset_id}."
+                )
+                appr_rec = register_pending_approval(
+                    dataset_id=dataset_id,
+                    project_id=project_id,
+                    action=action_plan,
+                    confidence=0.95,
+                    rows_affected_est=current_shape.get("rows", 0) if "outlier" in action_plan.action_type else 0,
+                )
+                pending_approvals.append(appr_rec)
+                has_pending_approval = True
+            else:
+                executed_actions.append(action_plan)
+
+        if has_pending_approval:
+            logger.info("Halting autonomous loop: pending human approval for high-risk action(s). No transformations applied yet.")
+            step_record = {
+                "iteration": iteration,
+                "pre_shape": current_shape,
+                "pre_issues_count": len(current_issues),
+                "health_grade": decision.current_health_grade,
+                "readiness_score": decision.readiness_score,
+                "llm_assessment": decision.assessment,
+                "is_dataset_clean": False,
+                "stopping_reason": "Paused: High-risk action requires human approval.",
+                "selected_actions": [a.model_dump() for a in decision.selected_actions],
+                "execution_results": [],
+                "post_shape": current_shape,
+                "waiting_approval": True,
+                "pending_approvals": pending_approvals,
+                "pending_safe_actions": [a.model_dump() for a in executed_actions],
+            }
+            steps_history.append(step_record)
+            break
+
+        # Execute safe or approved actions via Polars
         df = _load_dataframe(current_bytes, "csv")
         execution_results = []
-        for action_plan in decision.selected_actions:
+        for action_plan in executed_actions:
             df, action_res = apply_cleaning_action(df, action_plan, target_column)
             execution_results.append(action_res)
 
@@ -446,6 +498,9 @@ def run_agentic_cleaning_cycle(
             "selected_actions": [a.model_dump() for a in decision.selected_actions],
             "execution_results": execution_results,
             "post_shape": post_shape,
+            "waiting_approval": False,
+            "pending_approvals": [],
+            "pending_safe_actions": [],
         }
         steps_history.append(step_record)
 
@@ -469,11 +524,28 @@ def run_agentic_cleaning_cycle(
     final_health_grade = last_step.get("health_grade", "A" if final_issues_count == 0 else "B+")
     final_readiness = last_step.get("readiness_score", 95 if final_issues_count == 0 else 85)
 
+    all_pending = [a for s in steps_history for a in s.get("pending_approvals", [])]
+    is_waiting_approval = any(s.get("waiting_approval", False) for s in steps_history)
+
+    # Collect all pending safe actions across all steps in the loop
+    all_pending_safe = []
+    for s in steps_history:
+        if s.get("waiting_approval"):
+            all_pending_safe.extend(s.get("pending_safe_actions", []))
+        else:
+            # Safe actions in prior iterations before the pause
+            for act in s.get("selected_actions", []):
+                if not act.get("requires_approval") and act.get("action_type") not in [p.get("action_type") for p in all_pending]:
+                    all_pending_safe.append(act)
+
     return {
         "dataset_id": dataset_id,
         "task_type": task_type,
         "target_column": target_column,
         "total_iterations": len(steps_history),
+        "status": "WAITING_APPROVAL" if is_waiting_approval else "CLEANED",
+        "pending_approvals": all_pending,
+        "pending_safe_actions": all_pending_safe,
         "initial_metrics": {
             "rows": initial_profile.get("shape", {}).get("rows", 0),
             "columns": initial_profile.get("shape", {}).get("columns", 0),

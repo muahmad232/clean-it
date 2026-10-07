@@ -3,6 +3,7 @@ import {
   Sparkles,
   Bot,
   ShieldCheck,
+  ShieldAlert,
   AlertTriangle,
   CheckCircle2,
   Loader2,
@@ -22,6 +23,7 @@ import {
   Layers,
   Lock,
   Calendar,
+  X,
 } from 'lucide-react'
 import {
   cleanDataset,
@@ -31,6 +33,8 @@ import {
   fetchDatasetVersions,
   rollbackDatasetVersion,
   getVersionDownloadUrl,
+  fetchDatasetApprovals,
+  submitApprovalDecision,
 } from '../api'
 
 export default function DataCleaningCenter({
@@ -57,6 +61,14 @@ export default function DataCleaningCenter({
   const [rollbackSuccess, setRollbackSuccess] = useState(null)
   const [rollbackError, setRollbackError] = useState(null)
   const [rollbackConfirmVersion, setRollbackConfirmVersion] = useState(null)
+
+  // Phase 12: Human Approval System State
+  const [requireApproval, setRequireApproval] = useState(true)
+  const [pendingApprovals, setPendingApprovals] = useState([])
+  const [approvalsLoading, setApprovalsLoading] = useState(false)
+  const [approvalActionInProgress, setApprovalActionInProgress] = useState(null)
+  const [approvalFeedback, setApprovalFeedback] = useState({})
+  const [approvalBannerMsg, setApprovalBannerMsg] = useState(null)
 
   // AI Agent Loop Configuration & State
   const [maxIterations, setMaxIterations] = useState(3)
@@ -97,8 +109,23 @@ export default function DataCleaningCenter({
     }
   }
 
+  // Load pending approvals
+  const loadApprovals = async () => {
+    if (!dataset?.id) return
+    setApprovalsLoading(true)
+    try {
+      const data = await fetchDatasetApprovals(projectId || dataset.project_id, dataset.id, 'PENDING')
+      setPendingApprovals(data.approvals || [])
+    } catch (err) {
+      console.warn('Could not fetch pending approvals:', err)
+    } finally {
+      setApprovalsLoading(false)
+    }
+  }
+
   useEffect(() => {
     loadVersions()
+    loadApprovals()
   }, [dataset?.id])
 
   // ── Handler 1: Autonomous Multi-Step AI Agent Cleaning Loop ───────
@@ -106,6 +133,7 @@ export default function DataCleaningCenter({
     if (!dataset?.id) return
     setAgentLoading(true)
     setAgentError(null)
+    setApprovalBannerMsg(null)
 
     try {
       const res = await runAgenticCleaning(
@@ -113,7 +141,8 @@ export default function DataCleaningCenter({
         dataset.id,
         selectedTask,
         targetColumn.trim() || null,
-        maxIterations
+        maxIterations,
+        requireApproval
       )
       setAgentResult(res)
       if (res?.report?.steps && res.report.steps.length > 0) {
@@ -121,6 +150,11 @@ export default function DataCleaningCenter({
       }
       if (res?.version) {
         setCurrentVersion(res.version)
+      }
+      if (res?.pending_approvals && res.pending_approvals.length > 0) {
+        setPendingApprovals(res.pending_approvals)
+      } else {
+        await loadApprovals()
       }
       if (onDatasetCleaned) {
         onDatasetCleaned(res)
@@ -131,6 +165,148 @@ export default function DataCleaningCenter({
       setAgentError(err.message || 'Agent cleaning loop encountered an error.')
     } finally {
       setAgentLoading(false)
+    }
+  }
+
+  // ── Handlers for Human Approval (Phase 12) ────────────────────────
+  const handleApproveAction = async (actionId) => {
+    if (!dataset?.id || !actionId) return
+    setApprovalActionInProgress(actionId)
+    setApprovalBannerMsg(null)
+    try {
+      const feedbackText = approvalFeedback[actionId] || null
+      const res = await submitApprovalDecision(
+        projectId || dataset.project_id,
+        dataset.id,
+        actionId,
+        'approve',
+        feedbackText
+      )
+      setApprovalBannerMsg({
+        type: 'success',
+        text: res.message || 'Action approved & executed! New version snapshot created.',
+      })
+      const remainingApprovals = pendingApprovals.filter((item) => item.id !== actionId)
+      setPendingApprovals(remainingApprovals)
+      if (res.version) {
+        setCurrentVersion(res.version)
+      }
+
+      // Transition agentResult state out of paused status
+      setAgentResult((prev) => {
+        if (!prev) return null
+        const isStillWaiting = remainingApprovals.length > 0
+        return {
+          ...prev,
+          status: isStillWaiting ? 'WAITING_APPROVAL' : 'CLEANED',
+          message: isStillWaiting
+            ? prev.message
+            : (res.message || `Human approved action (${res.approval?.action_type || 'transformation'}) executed. New version snapshot created.`),
+          pending_approvals: remainingApprovals,
+          version: res.version || prev.version,
+          report: prev.report ? {
+            ...prev.report,
+            steps: prev.report.steps?.map((step) => ({
+              ...step,
+              selected_actions: step.selected_actions?.map((act) => {
+                if (act.approval_id === actionId || act.action_type === res.approval?.action_type) {
+                  return {
+                    ...act,
+                    requires_approval: false,
+                    approval_status: 'APPROVED',
+                  }
+                }
+                return act
+              }),
+            })),
+          } : prev.report,
+        }
+      })
+
+      await loadVersions()
+      await loadApprovals()
+      if (onDatasetCleaned) {
+        onDatasetCleaned(res)
+      }
+    } catch (err) {
+      console.error('Failed to approve action:', err)
+      setApprovalBannerMsg({
+        type: 'error',
+        text: err.message || 'Approval execution failed.',
+      })
+    } finally {
+      setApprovalActionInProgress(null)
+    }
+  }
+
+  const handleRejectAction = async (actionId) => {
+    if (!dataset?.id || !actionId) return
+    setApprovalActionInProgress(actionId)
+    setApprovalBannerMsg(null)
+    try {
+      const feedbackText = approvalFeedback[actionId] || null
+      const res = await submitApprovalDecision(
+        projectId || dataset.project_id,
+        dataset.id,
+        actionId,
+        'reject',
+        feedbackText
+      )
+      const remainingApprovals = pendingApprovals.filter((item) => item.id !== actionId)
+      setPendingApprovals(remainingApprovals)
+      if (res.version) {
+        setCurrentVersion(res.version)
+      }
+
+      setApprovalBannerMsg({
+        type: res.version ? 'success' : 'neutral',
+        text: res.message || 'Action rejected and skipped.',
+      })
+
+      // Transition agentResult state out of paused status
+      setAgentResult((prev) => {
+        if (!prev) return null
+        const isStillWaiting = remainingApprovals.length > 0
+        return {
+          ...prev,
+          status: isStillWaiting ? 'WAITING_APPROVAL' : 'CLEANED',
+          message: isStillWaiting
+            ? prev.message
+            : (res.message || `Action (${res.approval?.action_type || 'transformation'}) rejected by user. Working dataset updated.`),
+          pending_approvals: remainingApprovals,
+          version: res.version || prev.version,
+          report: prev.report ? {
+            ...prev.report,
+            steps: prev.report.steps?.map((step) => ({
+              ...step,
+              selected_actions: step.selected_actions?.map((act) => {
+                if (act.approval_id === actionId || act.action_type === res.approval?.action_type) {
+                  return {
+                    ...act,
+                    requires_approval: false,
+                    approval_status: 'REJECTED',
+                  }
+                }
+                return act
+              }),
+            })),
+          } : prev.report,
+        }
+      })
+
+      await loadVersions()
+      await loadApprovals()
+      if (onDatasetCleaned) {
+        onDatasetCleaned(res)
+      }
+    } catch (err) {
+      console.error('Failed to reject action:', err)
+      setApprovalBannerMsg({
+        type: 'error',
+        text: err.message || 'Rejection failed.',
+      })
+    } finally {
+      setApprovalActionInProgress(null)
     }
   }
 
@@ -275,6 +451,11 @@ export default function DataCleaningCenter({
               <span className="badge badge-muted" style={{ fontSize: '0.7rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
                 <Layers size={11} /> v{currentVersion?.version_number ?? 0}
               </span>
+              {pendingApprovals.length > 0 && (
+                <span className="badge badge-amber" style={{ fontSize: '0.7rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                  <ShieldAlert size={11} /> {pendingApprovals.length} Approval Required
+                </span>
+              )}
               {(agentResult || instantReport) && (
                 <span className="badge badge-green" style={{ fontSize: '0.7rem' }}>
                   <Check size={11} /> Cleaned
@@ -303,6 +484,19 @@ export default function DataCleaningCenter({
             style={{ fontSize: '0.75rem', padding: '0.25rem 0.65rem' }}
           >
             <Sparkles size={12} /> Autonomous AI Loop
+            {pendingApprovals.length > 0 && (
+              <span style={{
+                marginLeft: '0.35rem',
+                background: '#f59e0b',
+                color: '#000',
+                borderRadius: '999px',
+                padding: '0.05rem 0.35rem',
+                fontSize: '0.65rem',
+                fontWeight: 700,
+              }}>
+                {pendingApprovals.length}
+              </span>
+            )}
           </button>
           <button
             onClick={() => setActiveMode('instant_deterministic')}
@@ -447,6 +641,47 @@ export default function DataCleaningCenter({
               <option value={4}>4 Iterations</option>
               <option value={5}>5 Iterations (Deep Cleanup)</option>
             </select>
+          </div>
+        )}
+
+        {/* Phase 12: High-Risk Action Guard Toggle (Only in agent_loop mode) */}
+        {activeMode === 'agent_loop' && (
+          <div>
+            <label style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '0.3rem', fontWeight: 500 }}>
+              Safety & Approval Guard
+            </label>
+            <button
+              type="button"
+              onClick={() => setRequireApproval(!requireApproval)}
+              disabled={isAnyCleaningActive}
+              className="btn btn-ghost"
+              style={{
+                width: '100%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                background: requireApproval ? 'rgba(245, 158, 11, 0.08)' : 'var(--bg-surface)',
+                border: requireApproval ? '1px solid rgba(245, 158, 11, 0.45)' : '1px solid var(--border-medium)',
+                borderRadius: 'var(--radius-sm)',
+                padding: '0.35rem 0.6rem',
+                fontSize: '0.78rem',
+                color: requireApproval ? '#f59e0b' : 'var(--text-muted)',
+                cursor: 'pointer',
+                height: '34px',
+              }}
+              title="When enabled, high-risk actions (column drops, outlier removal) pause the agent and await human approval"
+            >
+              <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                <ShieldAlert size={13} color={requireApproval ? '#f59e0b' : 'var(--text-muted)'} />
+                {requireApproval ? 'Gate High Risk' : 'Full Autopilot'}
+              </span>
+              <span
+                className={`badge ${requireApproval ? 'badge-amber' : 'badge-muted'}`}
+                style={{ fontSize: '0.65rem', padding: '0.1rem 0.35rem' }}
+              >
+                {requireApproval ? 'ON' : 'OFF'}
+              </span>
+            </button>
           </div>
         )}
 
@@ -623,29 +858,292 @@ export default function DataCleaningCenter({
         </div>
       )}
 
-      {/* ── VIEW 1: AGENT LOOP RESULTS (When completed) ───────────── */}
-      {agentResult && !agentLoading && (
-        <div style={{ marginBottom: '1rem' }}>
-          {/* Top Banner: Success + Download Button */}
-          <div style={{
-            background: 'var(--bg-main)',
-            border: '1px solid var(--border-subtle)',
-            borderRadius: 'var(--radius-sm)',
-            padding: '1rem 1.25rem',
-            marginBottom: '1rem',
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '0.85rem' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <CheckCircle2 size={18} color="var(--emerald-primary)" />
-                <div>
-                  <h4 style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-                    Autonomous AI Cleaning Complete ({agentResult.report?.total_iterations} Iteration{agentResult.report?.total_iterations > 1 ? 's' : ''})
-                  </h4>
-                  <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                    Resolved {agentResult.report?.issues_resolved || 0} defect(s) across {agentResult.report?.steps?.length || 0} agentic cycle(s).
+      {/* ── Approval Success/Error Banner ───────────────────────── */}
+      {approvalBannerMsg && (
+        <div style={{
+          background: approvalBannerMsg.type === 'success' ? 'rgba(16, 185, 129, 0.1)' : approvalBannerMsg.type === 'error' ? 'var(--rose-bg)' : 'rgba(245, 158, 11, 0.1)',
+          border: `1px solid ${approvalBannerMsg.type === 'success' ? 'var(--emerald-primary)' : approvalBannerMsg.type === 'error' ? 'var(--rose-border)' : 'var(--amber-primary, #f59e0b)'}`,
+          borderRadius: 'var(--radius-sm)',
+          padding: '0.65rem 0.85rem',
+          marginBottom: '1rem',
+          fontSize: '0.78rem',
+          color: approvalBannerMsg.type === 'success' ? 'var(--emerald-primary)' : approvalBannerMsg.type === 'error' ? 'var(--rose-primary)' : '#f59e0b',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+            {approvalBannerMsg.type === 'success' ? <CheckCircle2 size={14} /> : <AlertTriangle size={14} />}
+            <span>{approvalBannerMsg.text}</span>
+          </div>
+          <button
+            onClick={() => setApprovalBannerMsg(null)}
+            style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: '0.85rem' }}
+          >
+            &times;
+          </button>
+        </div>
+      )}
+
+      {/* ── PHASE 12: IN-CENTER HUMAN APPROVAL CARD(S) ────────── */}
+      {pendingApprovals.length > 0 && (
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '0.85rem',
+          marginBottom: '1.25rem',
+        }}>
+          {pendingApprovals.map((item) => {
+            const isProcessing = approvalActionInProgress === item.id
+            const formatActionTitle = (type = '') => {
+              return type
+                .split('_')
+                .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+                .join(' ')
+            }
+
+            return (
+              <div
+                key={item.id}
+                style={{
+                  background: 'rgba(245, 158, 11, 0.05)',
+                  border: '1px solid rgba(245, 158, 11, 0.55)',
+                  borderRadius: 'var(--radius-sm)',
+                  padding: '1.1rem 1.25rem',
+                  position: 'relative',
+                  boxShadow: '0 4px 18px -4px rgba(245, 158, 11, 0.12)',
+                }}
+              >
+                {/* Header: Alert Icon + Action Title + Badges */}
+                <div style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'flex-start',
+                  flexWrap: 'wrap',
+                  gap: '0.65rem',
+                  marginBottom: '0.85rem',
+                  paddingBottom: '0.65rem',
+                  borderBottom: '1px solid rgba(245, 158, 11, 0.2)',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                    <div style={{
+                      background: 'rgba(245, 158, 11, 0.15)',
+                      padding: '0.4rem',
+                      borderRadius: 'var(--radius-sm)',
+                      border: '1px solid rgba(245, 158, 11, 0.35)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}>
+                      <ShieldAlert size={18} color="#f59e0b" />
+                    </div>
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                        <h4 style={{ fontSize: '0.925rem', fontWeight: 600, color: 'var(--text-primary)', margin: 0 }}>
+                          {formatActionTitle(item.action_type)}
+                        </h4>
+                        <span className="badge badge-amber" style={{ fontSize: '0.68rem', fontWeight: 700 }}>
+                          HIGH RISK
+                        </span>
+                        <span className="badge badge-muted" style={{ fontSize: '0.68rem' }}>
+                          Requires Authorization
+                        </span>
+                      </div>
+                      <p style={{ fontSize: '0.74rem', color: 'var(--text-muted)', margin: '0.2rem 0 0 0' }}>
+                        The autonomous agent paused cleaning before executing this destructive operation.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                    <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                      Confidence: <strong>{Math.round((item.confidence || 0.95) * 100)}%</strong>
+                    </span>
+                  </div>
+                </div>
+
+                {/* Impact Details & Target Columns */}
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                  gap: '0.75rem',
+                  background: 'var(--bg-main)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: 'var(--radius-sm)',
+                  padding: '0.75rem 0.9rem',
+                  marginBottom: '0.85rem',
+                  fontSize: '0.78rem',
+                }}>
+                  <div>
+                    <div style={{ color: 'var(--text-muted)', fontSize: '0.7rem', textTransform: 'uppercase', marginBottom: '0.25rem' }}>
+                      Impacted Target Column(s)
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
+                      {item.target_columns && item.target_columns.length > 0 ? (
+                        item.target_columns.map((col) => (
+                          <span
+                            key={col}
+                            className="badge badge-amber"
+                            style={{ fontFamily: 'var(--font-mono)', fontSize: '0.72rem', padding: '0.15rem 0.45rem' }}
+                          >
+                            {col}
+                          </span>
+                        ))
+                      ) : (
+                        <span style={{ color: 'var(--text-muted)' }}>Entire dataset / multiple rows</span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div>
+                    <div style={{ color: 'var(--text-muted)', fontSize: '0.7rem', textTransform: 'uppercase', marginBottom: '0.25rem' }}>
+                      Estimated Impact
+                    </div>
+                    <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
+                      {item.rows_affected_est > 0 ? `${item.rows_affected_est.toLocaleString()} rows` : 'Schema-level column removal'}
+                    </div>
+                  </div>
+
+                  <div>
+                    <div style={{ color: 'var(--text-muted)', fontSize: '0.7rem', textTransform: 'uppercase', marginBottom: '0.25rem' }}>
+                      Safety Policy
+                    </div>
+                    <div style={{ color: 'var(--text-secondary)' }}>
+                      Creates reversible immutable snapshot upon execution
+                    </div>
+                  </div>
+                </div>
+
+                {/* LLM Strategic Reasoning Box */}
+                <div style={{
+                  background: 'rgba(0, 0, 0, 0.25)',
+                  border: '1px solid var(--border-medium)',
+                  borderRadius: 'var(--radius-sm)',
+                  padding: '0.75rem 0.9rem',
+                  marginBottom: '0.85rem',
+                }}>
+                  <div style={{ fontSize: '0.7rem', color: '#f59e0b', textTransform: 'uppercase', fontWeight: 600, marginBottom: '0.3rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                    <Bot size={13} />
+                    LLM Autonomous Reasoning & Defect Analysis
+                  </div>
+                  <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.5, margin: 0 }}>
+                    {item.reasoning}
                   </p>
                 </div>
+
+                {/* Optional User Feedback / Instructions */}
+                <div style={{ marginBottom: '0.85rem' }}>
+                  <input
+                    type="text"
+                    placeholder="Optional feedback / reasoning note for audit trail (e.g., 'Approved for model baseline')..."
+                    value={approvalFeedback[item.id] || ''}
+                    onChange={(e) =>
+                      setApprovalFeedback((prev) => ({ ...prev, [item.id]: e.target.value }))
+                    }
+                    disabled={isProcessing}
+                    style={{
+                      width: '100%',
+                      background: 'var(--bg-surface)',
+                      border: '1px solid var(--border-medium)',
+                      color: 'var(--text-primary)',
+                      borderRadius: 'var(--radius-sm)',
+                      padding: '0.4rem 0.65rem',
+                      fontSize: '0.76rem',
+                      outline: 'none',
+                    }}
+                  />
+                </div>
+
+                {/* Action Buttons: Approve vs Reject */}
+                <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    onClick={() => handleRejectAction(item.id)}
+                    disabled={isProcessing}
+                    className="btn btn-ghost btn-sm"
+                    style={{
+                      fontSize: '0.78rem',
+                      border: '1px solid rgba(239, 68, 68, 0.4)',
+                      color: '#ef4444',
+                      padding: '0.35rem 0.8rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.35rem',
+                    }}
+                  >
+                    {isProcessing ? <Loader2 size={12} className="spin" /> : <X size={13} />}
+                    Reject & Skip Action
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleApproveAction(item.id)}
+                    disabled={isProcessing}
+                    className="btn btn-sm"
+                    style={{
+                      fontSize: '0.78rem',
+                      background: 'var(--emerald-primary, #10b981)',
+                      borderColor: 'var(--emerald-primary, #10b981)',
+                      color: '#000',
+                      fontWeight: 600,
+                      padding: '0.35rem 0.95rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.4rem',
+                    }}
+                  >
+                    {isProcessing ? <Loader2 size={12} className="spin" /> : <Check size={14} />}
+                    Approve & Execute Transformation
+                  </button>
+                </div>
               </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* ── VIEW 1: AGENT LOOP RESULTS (When completed or paused) ─── */}
+      {agentResult && !agentLoading && (
+        <div style={{ marginBottom: '1rem' }}>
+          {/* Top Banner: Success or Paused for Approval */}
+          {(() => {
+            const isWaitingForApproval = agentResult.status === 'WAITING_APPROVAL' && pendingApprovals.length > 0
+            return (
+              <div style={{
+                background: 'var(--bg-main)',
+                border: isWaitingForApproval ? '1px solid rgba(245, 158, 11, 0.6)' : '1px solid var(--border-subtle)',
+                borderRadius: 'var(--radius-sm)',
+                padding: '1rem 1.25rem',
+                marginBottom: '1rem',
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '0.85rem' }}>
+                  {isWaitingForApproval ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <ShieldAlert size={18} color="#f59e0b" />
+                      <div>
+                        <h4 style={{ fontSize: '0.95rem', fontWeight: 600, color: '#f59e0b' }}>
+                          Autonomous Agent Paused: Human Approval Required
+                        </h4>
+                        <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                          {agentResult.message || `Iteration ${agentResult.current_iteration || 1} halted. Please review the high-risk action above.`}
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <CheckCircle2 size={18} color="var(--emerald-primary)" />
+                      <div>
+                        <h4 style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                          Autonomous AI Cleaning Complete ({agentResult.report?.total_iterations || 1} Iteration{agentResult.report?.total_iterations > 1 ? 's' : ''})
+                        </h4>
+                        <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                          {agentResult.message && !agentResult.message.includes('halted') && !agentResult.message.includes('paused')
+                            ? agentResult.message
+                            : `Resolved ${agentResult.report?.issues_resolved || 0} defect(s) across ${agentResult.report?.steps?.length || 1} agentic cycle(s).`}
+                        </p>
+                      </div>
+                    </div>
+                  )}
 
               {/* Direct Download Cleaned CSV & Version Indicator */}
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
@@ -730,6 +1228,8 @@ export default function DataCleaningCenter({
               </div>
             </div>
           </div>
+        )
+      })()}
 
           {/* Multi-Step Agentic Audit Trail Accordion */}
           <div>
@@ -837,9 +1337,24 @@ export default function DataCleaningCenter({
                                     }}
                                   >
                                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', marginBottom: '0.25rem' }}>
-                                      <span className={`badge ${getActionBadgeClass(act.action_type)}`} style={{ fontFamily: 'var(--font-mono)', fontSize: '0.72rem' }}>
-                                        {act.action_type}
-                                      </span>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                                        <span className={`badge ${getActionBadgeClass(act.action_type)}`} style={{ fontFamily: 'var(--font-mono)', fontSize: '0.72rem' }}>
+                                          {act.action_type}
+                                        </span>
+                                        {act.approval_status === 'APPROVED' ? (
+                                          <span className="badge badge-green" style={{ fontSize: '0.66rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                                            <Check size={10} /> Approved & Executed
+                                          </span>
+                                        ) : act.approval_status === 'REJECTED' ? (
+                                          <span className="badge badge-rose" style={{ fontSize: '0.66rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                                            <X size={10} /> Rejected & Skipped
+                                          </span>
+                                        ) : (act.requires_approval || act.approval_status === 'PENDING') && pendingApprovals.length > 0 ? (
+                                          <span className="badge badge-amber" style={{ fontSize: '0.66rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                                            <ShieldAlert size={10} /> Paused for Approval (PENDING)
+                                          </span>
+                                        ) : null}
+                                      </div>
                                       {act.target_columns && act.target_columns.length > 0 && (
                                         <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
                                           target: [{act.target_columns.join(', ')}]
@@ -853,6 +1368,24 @@ export default function DataCleaningCenter({
                                       <div style={{ fontSize: '0.75rem', color: 'var(--emerald-primary)', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
                                         <ArrowRight size={11} />
                                         <span>Polars Result: {execRes.details}</span>
+                                      </div>
+                                    )}
+                                    {act.approval_status === 'REJECTED' && (
+                                      <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.3rem', marginTop: '0.25rem' }}>
+                                        <X size={11} color="var(--rose-primary, #f43f5e)" />
+                                        <span>Transformation skipped by user decision. Column data preserved.</span>
+                                      </div>
+                                    )}
+                                    {act.approval_status === 'APPROVED' && !execRes && (
+                                      <div style={{ fontSize: '0.74rem', color: 'var(--emerald-primary)', display: 'flex', alignItems: 'center', gap: '0.3rem', marginTop: '0.25rem' }}>
+                                        <Check size={11} />
+                                        <span>Transformation approved and executed. New version snapshot created.</span>
+                                      </div>
+                                    )}
+                                    {((act.requires_approval || act.approval_status === 'PENDING') && act.approval_status !== 'REJECTED' && act.approval_status !== 'APPROVED' && !execRes && pendingApprovals.length > 0) && (
+                                      <div style={{ fontSize: '0.74rem', color: '#f59e0b', display: 'flex', alignItems: 'center', gap: '0.3rem', marginTop: '0.25rem' }}>
+                                        <ShieldAlert size={11} />
+                                        <span>Execution paused pending human approval. See authorization card above.</span>
                                       </div>
                                     )}
                                   </div>

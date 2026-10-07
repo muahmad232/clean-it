@@ -143,6 +143,7 @@ def test_run_agentic_cleaning_cycle_with_mock_llm():
             task_type="CLASSIFICATION",
             target_column="survived",
             max_iterations=3,
+            require_approval=False,
         )
 
         assert result["total_iterations"] == 2

@@ -394,11 +394,12 @@ export async function analyzeDatasetWithLlm({
  * Triggers the autonomous multi-step agentic cleaning loop:
  * LLM diagnoses -> Selects functions -> Polars cleans -> Re-profiles -> Iterates until clean.
  */
-export async function runAgenticCleaning(projectId, datasetId, taskType = 'GENERAL', targetColumn = null, maxIterations = 3) {
+export async function runAgenticCleaning(projectId, datasetId, taskType = 'GENERAL', targetColumn = null, maxIterations = 3, requireApproval = true) {
   const params = new URLSearchParams()
   if (taskType) params.append('task_type', taskType)
   if (targetColumn) params.append('target_column', targetColumn)
   if (maxIterations) params.append('max_iterations', maxIterations)
+  if (requireApproval !== undefined && requireApproval !== null) params.append('require_approval', requireApproval)
 
   const url = projectId
     ? `${API_BASE}/api/v1/projects/${projectId}/datasets/${datasetId}/agent-clean?${params.toString()}`
@@ -417,6 +418,53 @@ export async function runAgenticCleaning(projectId, datasetId, taskType = 'GENER
     throw new Error(errBody.detail?.message || errBody.detail?.error || `Agentic cleaning failed (HTTP ${res.status})`)
   }
 
+  return await res.json()
+}
+
+/**
+ * Phase 12: Human Approval System
+ */
+
+export async function fetchDatasetApprovals(projectId, datasetId, statusFilter = null) {
+  const params = new URLSearchParams()
+  if (statusFilter) params.append('status_filter', statusFilter)
+
+  const queryStr = params.toString() ? `?${params.toString()}` : ''
+  const url = projectId
+    ? `${API_BASE}/api/v1/projects/${projectId}/datasets/${datasetId}/approvals${queryStr}`
+    : `${API_BASE}/api/v1/datasets/${datasetId}/approvals${queryStr}`
+
+  const res = await fetch(url, {
+    headers: getAuthHeaders(),
+  })
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({}))
+    throw new Error(errBody.detail?.message || errBody.detail?.error || `Failed to fetch approvals (HTTP ${res.status})`)
+  }
+  return await res.json()
+}
+
+export async function submitApprovalDecision(projectId, datasetId, actionId, decision, feedback = null) {
+  const url = projectId
+    ? `${API_BASE}/api/v1/projects/${projectId}/datasets/${datasetId}/approvals/${actionId}/decision`
+    : `${API_BASE}/api/v1/datasets/${datasetId}/approvals/${actionId}/decision`
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...getAuthHeaders(),
+    },
+    body: JSON.stringify({
+      decision: decision,
+      feedback: feedback,
+    }),
+  })
+
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({}))
+    throw new Error(errBody.detail?.message || errBody.detail?.error || `Failed to submit approval decision (HTTP ${res.status})`)
+  }
   return await res.json()
 }
 
