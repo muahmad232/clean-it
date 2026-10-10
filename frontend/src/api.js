@@ -562,6 +562,26 @@ export function getVersionDownloadUrl(projectId, datasetId, versionNumber, forma
   return `${API_BASE}/api/v1/datasets/${datasetId}/versions/${versionNumber}/download?format=${format}`
 }
 
+export async function downloadDatasetVersion(projectId, datasetId, versionNumber, format = 'csv') {
+  const url = getVersionDownloadUrl(projectId, datasetId, versionNumber, format)
+  const res = await fetch(url, {
+    headers: getAuthHeaders(),
+  })
+  if (res.ok) {
+    return await res.blob()
+  }
+  // Fallback to general dataset download endpoint if version endpoint fails
+  const fallbackUrl = getDownloadUrl(projectId, datasetId)
+  const fbRes = await fetch(fallbackUrl, {
+    headers: getAuthHeaders(),
+  })
+  if (fbRes.ok) {
+    return await fbRes.blob()
+  }
+  const errData = await res.json().catch(() => ({}))
+  throw new Error(errData?.detail?.message || errData?.message || `Failed to download file (HTTP ${res.status})`)
+}
+
 /**
  * Phase 13: Re-Profiling & Before/After Comparison
  */
@@ -582,6 +602,30 @@ export async function fetchDatasetComparison(projectId, datasetId, vOld = null, 
   if (!res.ok) {
     const errBody = await res.json().catch(() => ({}))
     throw new Error(errBody.detail?.message || errBody.detail?.error || `Failed to fetch comparison (HTTP ${res.status})`)
+  }
+  return await res.json()
+}
+
+/**
+ * Phase 16: Chat-Driven Autonomous Pipeline & Safe Dynamic Transformations
+ */
+export async function chatCleanDataset(projectId, datasetId, payload) {
+  const url = projectId
+    ? `${API_BASE}/api/v1/projects/${projectId}/datasets/${datasetId}/chat-clean`
+    : `${API_BASE}/api/v1/datasets/${datasetId}/chat-clean`
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...getAuthHeaders(),
+    },
+    body: JSON.stringify(payload),
+  })
+
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({}))
+    throw new Error(errBody.detail?.message || errBody.detail?.error || errBody.message || `Chat cleaning failed (HTTP ${res.status})`)
   }
   return await res.json()
 }

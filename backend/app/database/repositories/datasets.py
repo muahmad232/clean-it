@@ -179,28 +179,60 @@ def update_dataset_profile(dataset_id: str, profile_dict: dict) -> dict:
     Sets:
       - profile_json  (JSONB)
       - profiled_at   (now)
-      - status        → COMPLETED
+      - status        → COMPLETED (if not already cleaned/approved)
     """
     from datetime import datetime, timezone
     import json as _json
 
     client = get_service_client()
-    payload = {
+    existing = get_dataset(dataset_id)
+    existing_status = existing.get("status") if existing else None
+    
+    # Preserve version lineage & cleaned file path if not in incoming profile_dict
+    if existing:
+        old_pj = existing.get("profile_json") or {}
+        for key in ["versions", "current_version", "version_number", "cleaned_storage_path", "self_healing_report", "latest_comparison"]:
+            if key in old_pj and key not in profile_dict:
+                profile_dict[key] = old_pj[key]
+
+    new_status = "COMPLETED"
+    if existing_status in ["CLEANED", "CONVERGED", "WAITING_APPROVAL", "ROLLED_BACK"]:
+        new_status = existing_status
+
+    payload: dict = {
         "profile_json": profile_dict,
         "profiled_at": datetime.now(timezone.utc).isoformat(),
-        "status": "COMPLETED",
+        "status": new_status,
         # Update row/column counts from the profile if present
         "row_count": profile_dict.get("shape", {}).get("rows"),
         "column_count": profile_dict.get("shape", {}).get("columns"),
     }
-    result = (
-        client.schema(SCHEMA)
-        .table("datasets")
-        .update(payload)
-        .eq("id", dataset_id)
-        .execute()
-    )
-    record = result.data[0]
+
+    # If current_version has an id, attempt setting current_version_id safely
+    curr_v = profile_dict.get("current_version")
+    if curr_v and curr_v.get("id"):
+        payload["current_version_id"] = curr_v.get("id")
+
+    try:
+        result = (
+            client.schema(SCHEMA)
+            .table("datasets")
+            .update(payload)
+            .eq("id", dataset_id)
+            .execute()
+        )
+    except Exception:
+        # Fallback if column does not exist
+        payload.pop("current_version_id", None)
+        result = (
+            client.schema(SCHEMA)
+            .table("datasets")
+            .update(payload)
+            .eq("id", dataset_id)
+            .execute()
+        )
+
+    record = result.data[0] if result.data else {}
     logger.info(f"Profile saved for dataset id={dataset_id} rows={payload['row_count']}")
     return record
 

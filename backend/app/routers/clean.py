@@ -23,6 +23,7 @@ from app.database.client import get_service_client
 from app.database.repositories.datasets import get_dataset, get_project, update_dataset_profile
 from app.services.cleaner import clean_dataset
 from app.services.agent_cleaner import run_agentic_cleaning_cycle
+from app.models.chat_clean import ChatCleanRequest, ChatCleanResponse
 from app.storage.supabase import download_file, upload_file
 
 logger = get_logger(__name__)
@@ -167,6 +168,9 @@ def clean_project_dataset(
             )
         comparison_report = comparison.to_dict()
         profile_json["latest_comparison"] = comparison_report
+        if new_version:
+            profile_json["current_version"] = new_version
+            profile_json["version_number"] = new_version.get("version_number")
         update_dataset_profile(dataset_id, profile_json)
     except Exception as exc:
         logger.warning(f"Could not compute comparison for cleaned dataset: {exc}")
@@ -421,6 +425,11 @@ def clean_project_dataset_agentic(
 
         comparison_report = comparison.to_dict()
         profile_json["latest_comparison"] = comparison_report
+        if new_version:
+            final_profile["current_version"] = new_version
+            final_profile["version_number"] = new_version.get("version_number")
+            profile_json["current_version"] = new_version
+            profile_json["version_number"] = new_version.get("version_number")
         update_dataset_profile(dataset_id, profile_json)
     except Exception as exc:
         logger.warning(f"Could not compute comparison for agent-cleaned dataset: {exc}")
@@ -644,6 +653,16 @@ def clean_project_dataset_self_heal(
         except Exception as exc:
             logger.warning(f"Could not snapshot version for self-healed dataset: {exc}")
 
+    if new_version:
+        final_profile["current_version"] = new_version
+        final_profile["version_number"] = new_version.get("version_number")
+        profile_json["current_version"] = new_version
+        profile_json["version_number"] = new_version.get("version_number")
+        try:
+            update_dataset_profile(dataset_id, profile_json)
+        except Exception:
+            pass
+
     return {
         "dataset_id": dataset_id,
         "status": effective_status,
@@ -684,6 +703,250 @@ def clean_direct_dataset_self_heal(
         target_column=target_column,
         max_iterations=max_iterations,
         require_approval=require_approval,
+    )
+
+
+@router.post(
+    "/api/v1/projects/{project_id}/datasets/{dataset_id}/chat-clean",
+    summary="Phase 16: Intent-Guided Autonomous Chat Cleaning with Safe Dynamic Functions",
+    status_code=status.HTTP_200_OK,
+)
+def clean_project_dataset_chat(
+    project_id: str,
+    dataset_id: str,
+    payload: ChatCleanRequest,
+):
+    """
+    Phase 16 Conversational Cleaning Endpoint:
+    Conditioned on natural language task requirements provided by the user.
+    1. Evaluates dataset and plans standard Polars tools or writes safe dynamic Polars functions.
+    2. Enforces AST validation and mandatory Human Approval on custom scripts.
+    3. Executes transformations with automatic rollback on regression.
+    4. Re-profiles and produces Before/After comparison and version snapshots.
+    """
+    project = get_project(project_id)
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "project_not_found", "message": f"Project '{project_id}' not found."},
+        )
+
+    dataset = get_dataset(dataset_id)
+    if not dataset or dataset.get("project_id") != project_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "dataset_not_found", "message": f"Dataset '{dataset_id}' not found."},
+        )
+
+    profile_json = dataset.get("profile_json") or {}
+    working_storage_path = profile_json.get("cleaned_storage_path") or dataset.get("storage_path")
+    if not working_storage_path:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"error": "no_file", "message": "Dataset has not been uploaded yet."},
+        )
+
+    try:
+        raw_bytes = download_file(working_storage_path)
+    except Exception as exc:
+        logger.error(f"Failed downloading working file from storage: {exc}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"error": "storage_error", "message": f"Could not retrieve dataset file: {exc}"},
+        )
+
+    effective_task = payload.task_objective or dataset.get("task_type", "GENERAL")
+    effective_target = payload.target_column if payload.target_column is not None else dataset.get("target_column")
+    file_type = dataset.get("file_type", "csv")
+
+    from app.agent.orchestrator import run_self_healing_agent_loop
+    try:
+        report = run_self_healing_agent_loop(
+            dataset_id=dataset_id,
+            file_bytes=raw_bytes,
+            file_type=file_type,
+            task_type=effective_task,
+            target_column=effective_target,
+            max_iterations=payload.max_iterations,
+            project_id=project_id,
+            require_approval=payload.require_approval,
+            user_instructions=payload.user_instructions,
+        )
+    except Exception as exc:
+        logger.exception(f"Chat-driven self-healing loop failed on dataset {dataset_id}: {exc}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"error": "chat_clean_failed", "message": f"Chat-guided autonomous cleaning failed: {exc}"},
+        )
+
+    report_dict = report.model_dump(exclude={"cleaned_bytes"})
+    cleaned_bytes = report.cleaned_bytes
+    final_profile = report.final_profile
+    effective_status = report.status
+
+    if effective_status == "WAITING_APPROVAL":
+        profile_json["self_healing_report"] = report_dict
+        profile_json["pending_safe_actions"] = report.pending_safe_actions
+        profile_json["chat_instructions"] = payload.user_instructions
+        try:
+            update_dataset_profile(dataset_id, profile_json)
+            client_db = get_service_client()
+            client_db.schema("data_agent").table("datasets").update({"status": "WAITING_APPROVAL"}).eq("id", dataset_id).execute()
+        except Exception as exc:
+            logger.warning(f"Could not persist chat-clean approval state to DB: {exc}")
+
+        return {
+            "dataset_id": dataset_id,
+            "user_instructions": payload.user_instructions,
+            "status": "WAITING_APPROVAL",
+            "task_type": effective_task,
+            "target_column": effective_target,
+            "report": report_dict,
+            "final_profile": profile_json,
+            "version": None,
+            "pending_approvals": report.pending_approvals,
+            "pending_safe_actions": report.pending_safe_actions,
+            "custom_scripts": report.custom_scripts_executed,
+            "total_rollbacks": report.total_rollbacks,
+            "download_url": f"/api/v1/projects/{project_id}/datasets/{dataset_id}/download",
+            "termination_reason": report.termination_reason,
+        }
+
+    # Upload cleaned file
+    cleaned_path = f"datasets/cleaned/{project_id}/{dataset_id}/cleaned_{dataset.get('original_filename', 'data.csv')}"
+    if cleaned_bytes:
+        try:
+            upload_file(cleaned_path, cleaned_bytes, content_type="text/csv")
+        except Exception as exc:
+            logger.warning(f"Could not upload chat-cleaned file to storage ({exc}); proceeding.")
+
+    # Update profile & dataset record
+    profile_json["self_healing_report"] = report_dict
+    profile_json["cleaned_storage_path"] = cleaned_path
+    profile_json["shape"] = final_profile.get("shape", profile_json.get("shape"))
+    profile_json["total_null_pct"] = final_profile.get("total_null_pct", 0.0)
+    profile_json["duplicate_row_count"] = final_profile.get("duplicate_row_count", 0)
+    profile_json["columns"] = final_profile.get("columns", profile_json.get("columns"))
+    profile_json["issues"] = final_profile.get("issues", [])
+    profile_json["llm_summary"] = final_profile.get("llm_summary", profile_json.get("llm_summary"))
+    profile_json["chat_instructions"] = payload.user_instructions
+
+    try:
+        update_dataset_profile(dataset_id, profile_json)
+        up_data = {"status": effective_status}
+        if effective_target:
+            up_data["target_column"] = effective_target
+        if effective_task:
+            up_data["task_type"] = effective_task
+        client_db = get_service_client()
+        client_db.schema("data_agent").table("datasets").update(up_data).eq("id", dataset_id).execute()
+    except Exception as exc:
+        logger.warning(f"Could not persist chat-clean DB record: {exc}")
+
+    # Version snapshot
+    new_version = None
+    if cleaned_bytes:
+        try:
+            from app.services.versioning import create_dataset_version
+            shape = final_profile.get("shape", {})
+            instr_summary = payload.user_instructions[:45] + ("..." if len(payload.user_instructions) > 45 else "")
+            action_desc = f"Chat Clean: {instr_summary}"
+            new_version = create_dataset_version(
+                dataset_id=dataset_id,
+                project_id=project_id,
+                file_bytes=cleaned_bytes,
+                file_type="csv",
+                action_name=action_desc,
+                action_details={
+                    "user_instructions": payload.user_instructions,
+                    "total_iterations": report.total_iterations,
+                    "total_rollbacks": report.total_rollbacks,
+                    "quality_improvement": report.overall_quality_improvement,
+                    "initial_quality": report.initial_quality_score,
+                    "final_quality": report.final_quality_score,
+                    "custom_scripts_count": len(report.custom_scripts_executed),
+                    "termination_reason": report.termination_reason,
+                },
+                metrics={
+                    "rows": shape.get("rows", 0),
+                    "columns": shape.get("columns", 0),
+                    "total_null_pct": final_profile.get("total_null_pct", 0.0),
+                    "duplicate_row_count": final_profile.get("duplicate_row_count", 0),
+                    "quality_score": report.final_quality_score,
+                    "total_rollbacks": report.total_rollbacks,
+                },
+                quality_score=report.final_quality_score,
+            )
+        except Exception as exc:
+            logger.warning(f"Could not snapshot version for chat-cleaned dataset: {exc}")
+
+    if new_version:
+        final_profile["current_version"] = new_version
+        final_profile["version_number"] = new_version.get("version_number")
+        final_profile["version"] = new_version
+        profile_json["current_version"] = new_version
+        profile_json["version_number"] = new_version.get("version_number")
+        profile_json["version"] = new_version
+        try:
+            from app.database.repositories.versions import list_versions
+            all_vers = list_versions(dataset_id)
+            final_profile["versions"] = all_vers
+            profile_json["versions"] = all_vers
+        except Exception:
+            pass
+        try:
+            update_dataset_profile(dataset_id, profile_json)
+            client_db = get_service_client()
+            client_db.schema("data_agent").table("datasets").update({
+                "current_version_id": new_version.get("id"),
+                "status": effective_status,
+            }).eq("id", dataset_id).execute()
+        except Exception as exc:
+            logger.debug(f"Could not update dataset profile with chat version: {exc}")
+
+    # Comparison report
+    comparison_dict = None
+    if report.steps and report.steps[-1].comparison:
+        comparison_dict = report.steps[-1].comparison.model_dump()
+
+    return {
+        "dataset_id": dataset_id,
+        "user_instructions": payload.user_instructions,
+        "status": effective_status,
+        "task_type": effective_task,
+        "target_column": effective_target,
+        "report": report_dict,
+        "final_profile": final_profile,
+        "version": new_version,
+        "comparison": comparison_dict,
+        "total_rollbacks": report.total_rollbacks,
+        "custom_scripts": report.custom_scripts_executed,
+        "pending_approvals": [],
+        "download_url": f"/api/v1/projects/{project_id}/datasets/{dataset_id}/download",
+        "termination_reason": report.termination_reason,
+    }
+
+
+@router.post(
+    "/api/v1/datasets/{dataset_id}/chat-clean",
+    summary="Phase 16: Intent-Guided Autonomous Chat Cleaning (direct)",
+    status_code=status.HTTP_200_OK,
+)
+def clean_direct_dataset_chat(
+    dataset_id: str,
+    payload: ChatCleanRequest,
+):
+    """Direct route for chat-guided cleaning without project_id in URL."""
+    dataset = get_dataset(dataset_id)
+    if not dataset:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "dataset_not_found", "message": f"Dataset '{dataset_id}' not found."},
+        )
+    return clean_project_dataset_chat(
+        project_id=dataset["project_id"],
+        dataset_id=dataset_id,
+        payload=payload,
     )
 
 

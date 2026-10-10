@@ -61,6 +61,7 @@ class SelfHealingOrchestrator:
         target_column: Optional[str] = None,
         project_id: Optional[str] = None,
         require_approval: Optional[bool] = None,
+        user_instructions: Optional[str] = None,
     ) -> SelfHealingOrchestrationReport:
         effective_approval = (
             require_approval if require_approval is not None else self.config.require_approval
@@ -70,8 +71,9 @@ class SelfHealingOrchestrator:
         max_actions_per_iter = min(self.config.max_actions_per_iteration, 10)
 
         logger.info(
-            f"Initiating Phase 14 Self-Healing Loop for dataset={dataset_id}, "
-            f"task={task_type}, target={target_column}, max_iters={max_iters}, max_llm_calls={max_llm_calls}"
+            f"Initiating Phase 14/16 Self-Healing Loop for dataset={dataset_id}, "
+            f"task={task_type}, target={target_column}, max_iters={max_iters}, max_llm_calls={max_llm_calls}, "
+            f"has_instructions={bool(user_instructions)}"
         )
 
         provider = agent_cleaner.get_llm_provider()
@@ -79,6 +81,7 @@ class SelfHealingOrchestrator:
         regression_history: List[RegressionEvent] = []
         all_pending_approvals: List[Dict[str, Any]] = []
         all_pending_safe_actions: List[Dict[str, Any]] = []
+        all_custom_scripts: List[Dict[str, Any]] = []
 
         # 1. Baseline Profiling
         initial_profile_obj = profile_dataset(
@@ -110,7 +113,7 @@ class SelfHealingOrchestrator:
             total_null_pct = float(working_profile.get("total_null_pct", 0.0) or 0.0)
             dup_count = int(working_profile.get("duplicate_row_count", 0) or 0)
 
-            # Check if dataset is already clean with no detectable defects
+            # Check if dataset is already clean with no detectable defects (and no pending user instructions)
             if not current_issues and total_null_pct == 0.0 and dup_count == 0 and iteration > 1:
                 termination_reason = "Dataset verified clean: all defects resolved."
                 effective_status = "CONVERGED"
@@ -143,7 +146,7 @@ class SelfHealingOrchestrator:
                 "Your objective:\n"
                 "1. Assess data quality grade (A+, A, B, C, D, F) and readiness score (0-100).\n"
                 "2. Determine if the dataset is now sufficiently clean (is_dataset_clean = True).\n"
-                "3. If NOT clean, select 1 to 3 precise cleaning functions from this deterministic catalog:\n"
+                "3. Select 1 to 3 precise cleaning functions from this catalog:\n"
                 "   - 'remove_duplicates': Drop duplicate rows.\n"
                 "   - 'fix_type_mismatches': Cast string numbers to numeric Float64/Int64.\n"
                 "   - 'drop_high_null_columns': Drop columns with extreme nulls (params: {'threshold_pct': 70.0}).\n"
@@ -152,11 +155,19 @@ class SelfHealingOrchestrator:
                 "   - 'drop_columns': Drop specific named columns (target_columns: ['colA']).\n"
                 "   - 'impute_missing': Impute nulls (target_columns: ['col'], params: {'strategy': 'median'|'mean'|'mode'}).\n"
                 "   - 'handle_outliers': Clip extreme numeric anomalies using IQR bounds.\n"
-                "   - 'trim_whitespace': Strip text whitespace across columns.\n\n"
+                "   - 'trim_whitespace': Strip text whitespace across columns.\n"
+                "   - 'custom_polars_script': When user instructions require transformations not achievable via standard tools "
+                "(e.g. custom math formulas, feature engineering, conditional expressions). "
+                "Parameters: {'function_name': str, 'description': str, 'code': 'def transform(df: pl.DataFrame) -> pl.DataFrame: ...'}.\n"
+                "     RULES FOR custom_polars_script:\n"
+                "     * Must define a single function: `def transform(df: pl.DataFrame) -> pl.DataFrame:`\n"
+                "     * Use ONLY Polars operations (e.g. df.with_columns(pl.col(...)), df.filter(...), etc.).\n"
+                "     * NO import statements (all imports are forbidden and rejected by the sandbox).\n"
+                "     * Deterministic, safe transformations only.\n\n"
                 "CRITICAL RULES:\n"
-                "- Only select transformations that directly address active detected defects.\n"
+                "- Only select transformations that directly address active detected defects or user requirements.\n"
                 "- Protect the target column if specified; NEVER drop or distort target label distribution.\n"
-                "- If all major defects are solved, set is_dataset_clean=True with empty actions.\n"
+                "- If all major defects are solved and user instructions fulfilled, set is_dataset_clean=True with empty actions.\n"
             )
 
             # Inject Regression Alert if previous action failed
@@ -176,6 +187,13 @@ class SelfHealingOrchestrator:
                 f"Current Total Null Percentage: {total_null_pct}%\n\n"
                 f"Active Defects Detected:\n{issues_snippet}\n"
             )
+            if user_instructions:
+                user_content += (
+                    f"\n🎯 USER REQUIREMENTS & INTENT:\n"
+                    f"\"{user_instructions}\"\n"
+                    "You MUST prioritize satisfying the user's specific requirements alongside data defect cleanup.\n"
+                    "If user requirements require a calculation or new column not in the standard tools, use 'custom_polars_script'.\n"
+                )
             if prev_steps_summary:
                 user_content += f"\nPrevious Iterations Log:\n{prev_steps_summary}\n"
 
@@ -244,6 +262,20 @@ class SelfHealingOrchestrator:
                 risk_level, needs_approval = classify_action_risk(
                     act.action_type, act.parameters, act.target_columns
                 )
+                if act.action_type == "custom_polars_script":
+                    code_param = (act.parameters or {}).get("code", "")
+                    from app.services.code_sandbox import validate_polars_code
+                    is_safe, val_err = validate_polars_code(code_param)
+                    all_custom_scripts.append({
+                        "iteration": iteration,
+                        "function_name": (act.parameters or {}).get("function_name", "transform"),
+                        "description": (act.parameters or {}).get("description", act.reasoning),
+                        "code": code_param,
+                        "is_safe": is_safe,
+                        "validation_error": val_err,
+                        "requires_approval": needs_approval,
+                    })
+
                 if effective_approval and needs_approval:
                     appr_rec = register_pending_approval(
                         dataset_id=dataset_id,
@@ -496,6 +528,8 @@ class SelfHealingOrchestrator:
             },
             cleaned_bytes=working_bytes,
             final_profile=final_profile,
+            user_instructions=user_instructions,
+            custom_scripts_executed=all_custom_scripts,
         )
 
         logger.info(
@@ -516,6 +550,7 @@ def run_self_healing_agent_loop(
     max_iterations: int = 5,
     project_id: Optional[str] = None,
     require_approval: bool = True,
+    user_instructions: Optional[str] = None,
     config: Optional[OrchestratorConfig] = None,
 ) -> SelfHealingOrchestrationReport:
     """Convenience runner function for the self-healing autonomous loop."""
@@ -532,4 +567,5 @@ def run_self_healing_agent_loop(
         target_column=target_column,
         project_id=project_id,
         require_approval=require_approval,
+        user_instructions=user_instructions,
     )

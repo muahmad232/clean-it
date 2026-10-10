@@ -80,9 +80,36 @@ def create_dataset_version(
     """
     existing_versions = list_versions(dataset_id)
     if not existing_versions:
-        version_number = 0
-        parent_id = None
-        action_title = action_name if action_name != "transformation" else "Initial Dataset Ingest (v0 Original)"
+        if "Initial" in action_name or action_name == "transformation":
+            version_number = 0
+            parent_id = None
+            action_title = action_name if action_name != "transformation" else "Initial Dataset Ingest (v0 Original)"
+        else:
+            # First cleaning action on a dataset that didn't have v0 recorded
+            try:
+                from app.database.repositories.datasets import get_dataset
+                ds = get_dataset(dataset_id)
+                if ds and ds.get("storage_path"):
+                    v0_row = {
+                        "dataset_id": dataset_id,
+                        "version_number": 0,
+                        "parent_version_id": None,
+                        "storage_path": ds["storage_path"],
+                        "file_type": "csv",
+                        "metrics_json": ds.get("profile_json", {}).get("shape", {}),
+                        "created_by_action": "Initial Dataset Ingest (v0 Original)",
+                        "action_details": {},
+                        "is_current": False,
+                    }
+                    saved_v0 = save_version(v0_row)
+                    parent_id = saved_v0.get("id")
+                else:
+                    parent_id = None
+            except Exception as exc:
+                logger.debug(f"Could not synthesize v0 on first clean: {exc}")
+                parent_id = None
+            version_number = 1
+            action_title = action_name
     else:
         max_v = max(v.get("version_number", 0) for v in existing_versions)
         version_number = max_v + 1

@@ -164,6 +164,19 @@ export default function App() {
       setProfileData(cleanedResult.final_profile)
       setIssuesData(cleanedResult.final_profile.issues || [])
     }
+    if (cleanedResult?.version) {
+      setActiveDataset((prev) =>
+        prev
+          ? {
+              ...prev,
+              current_version: cleanedResult.version,
+              current_version_id: cleanedResult.version.id,
+              version_number: cleanedResult.version.version_number,
+              status: cleanedResult.status || prev.status,
+            }
+          : prev
+      )
+    }
   }
 
   const handleSignOut = async () => {

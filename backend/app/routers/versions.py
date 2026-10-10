@@ -183,13 +183,55 @@ def download_dataset_version(
 ):
     """Download a specific dataset version snapshot as CSV or Parquet."""
     dataset = get_dataset(dataset_id)
-    if not dataset or dataset.get("project_id") != project_id:
+    if not dataset:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"error": "dataset_not_found", "message": f"Dataset '{dataset_id}' not found."},
         )
 
+    # Use actual project_id from dataset if URL project_id differs
+    effective_project_id = dataset.get("project_id") or project_id
+    profile_json = dataset.get("profile_json") or {}
+
     ver = get_version_by_number(dataset_id, version_number)
+    if not ver:
+        # Check if version exists in profile_json
+        curr_ver = profile_json.get("current_version")
+        if curr_ver and curr_ver.get("version_number") == version_number:
+            ver = curr_ver
+        else:
+            for pv in profile_json.get("versions", []):
+                if pv.get("version_number") == version_number:
+                    ver = pv
+                    break
+
+    # If still not found, handle special fallbacks:
+    if not ver:
+        if version_number == 0:
+            ver = {
+                "dataset_id": dataset_id,
+                "version_number": 0,
+                "storage_path": dataset.get("storage_path"),
+                "file_type": "csv",
+                "created_by_action": "Initial Dataset Ingest (v0 Original)",
+            }
+        elif version_number == 1 and profile_json.get("cleaned_storage_path"):
+            ver = {
+                "dataset_id": dataset_id,
+                "version_number": 1,
+                "storage_path": profile_json.get("cleaned_storage_path"),
+                "file_type": "csv",
+                "created_by_action": "Cleaned Dataset Snapshot",
+            }
+        elif profile_json.get("version_number") == version_number or dataset.get("version_number") == version_number:
+            ver = {
+                "dataset_id": dataset_id,
+                "version_number": version_number,
+                "storage_path": profile_json.get("cleaned_storage_path") or dataset.get("storage_path"),
+                "file_type": "csv",
+                "created_by_action": f"Dataset Version v{version_number}",
+            }
+
     if not ver:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -199,37 +241,68 @@ def download_dataset_version(
     orig_base = dataset.get("original_filename", "dataset.csv")
     if orig_base.endswith(".csv"):
         base_name = orig_base[:-4]
+    elif orig_base.endswith(".parquet"):
+        base_name = orig_base[:-8]
     else:
         base_name = orig_base
 
     filename = f"{base_name}_v{version_number}.{format}"
-    media_type = "text/csv" if format == "csv" else "application/octet-stream"
+    media_type = "text/csv; charset=utf-8" if format == "csv" else "application/octet-stream"
 
-    # Preferred storage paths
-    parquet_path = f"datasets/versions/{project_id}/{dataset_id}/v{version_number}.parquet"
-    csv_path = f"datasets/versions/{project_id}/{dataset_id}/v{version_number}.csv"
-    active_path = ver.get("storage_path")
+    # Build ordered list of candidate storage paths to try
+    candidate_paths: list[str] = []
+
+    # 1. Standard version path for requested format
+    candidate_paths.append(f"datasets/versions/{effective_project_id}/{dataset_id}/v{version_number}.{format}")
+    candidate_paths.append(f"versions/{effective_project_id}/{dataset_id}/v{version_number}.{format}")
+
+    # 2. Storage path recorded in version row
+    if ver.get("storage_path"):
+        sp = ver["storage_path"]
+        candidate_paths.append(sp)
+        if sp.startswith("datasets/"):
+            candidate_paths.append(sp[len("datasets/"):])
+        else:
+            candidate_paths.append(f"datasets/{sp}")
+
+    # 3. Alternate format paths for transcoding
+    alt_fmt = "parquet" if format == "csv" else "csv"
+    candidate_paths.append(f"datasets/versions/{effective_project_id}/{dataset_id}/v{version_number}.{alt_fmt}")
+    candidate_paths.append(f"versions/{effective_project_id}/{dataset_id}/v{version_number}.{alt_fmt}")
+
+    # 4. Cleaned storage path from profile_json (if version > 0 or current)
+    cleaned_sp = profile_json.get("cleaned_storage_path")
+    if cleaned_sp and (version_number > 0 or not ver.get("storage_path")):
+        candidate_paths.append(cleaned_sp)
+        if cleaned_sp.startswith("datasets/"):
+            candidate_paths.append(cleaned_sp[len("datasets/"):])
+        else:
+            candidate_paths.append(f"datasets/{cleaned_sp}")
+
+    # 5. Dataset original storage_path (for v0 or general fallback)
+    orig_sp = dataset.get("storage_path")
+    if orig_sp:
+        candidate_paths.append(orig_sp)
+        if orig_sp.startswith("datasets/"):
+            candidate_paths.append(orig_sp[len("datasets/"):])
+        else:
+            candidate_paths.append(f"datasets/{orig_sp}")
+
+    # Deduplicate candidate paths while preserving order
+    seen = set()
+    deduped_paths: list[str] = []
+    for p in candidate_paths:
+        if p and p not in seen:
+            seen.add(p)
+            deduped_paths.append(p)
 
     file_bytes = None
-    target_path = parquet_path if format == "parquet" else csv_path
-
-    # Try exact format storage path first
-    try:
-        file_bytes = download_file(target_path)
-    except Exception:
-        pass
-
-    # If not found, try active path recorded in version row
-    if not file_bytes and active_path:
+    for p in deduped_paths:
         try:
-            file_bytes = download_file(active_path)
-        except Exception:
-            pass
-
-    # Fallback to dataset storage_path if v0
-    if not file_bytes and version_number == 0 and dataset.get("storage_path"):
-        try:
-            file_bytes = download_file(dataset["storage_path"])
+            file_bytes = download_file(p)
+            if file_bytes:
+                logger.info(f"Successfully retrieved snapshot bytes from storage path: {p}")
+                break
         except Exception:
             pass
 
@@ -239,14 +312,16 @@ def download_dataset_version(
             detail={"error": "version_file_not_found", "message": f"Snapshot file for version v{version_number} not found."},
         )
 
-    # Format transcoding if needed
-    if format == "csv" and target_path == parquet_path:
+    # Format transcoding based on actual inspected payload magic bytes
+    is_parquet = len(file_bytes) >= 4 and file_bytes[:4] == b"PAR1"
+
+    if format == "csv" and is_parquet:
         try:
             df = pl.read_parquet(io.BytesIO(file_bytes))
             file_bytes = df.write_csv().encode("utf-8")
         except Exception as exc:
             logger.warning(f"Could not convert Parquet to CSV: {exc}")
-    elif format == "parquet" and target_path == csv_path:
+    elif format == "parquet" and not is_parquet:
         try:
             df = pl.read_csv(io.BytesIO(file_bytes), ignore_errors=True)
             buf = io.BytesIO()
@@ -258,7 +333,10 @@ def download_dataset_version(
     return Response(
         content=file_bytes,
         media_type=media_type,
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Type": media_type,
+        },
     )
 
 

@@ -41,7 +41,7 @@ class CleaningActionPlan(BaseModel):
             "Action to run: 'remove_duplicates', 'fix_type_mismatches', "
             "'drop_high_null_columns', 'drop_constant_columns', "
             "'drop_surrogate_identifiers', 'drop_columns', "
-            "'impute_missing', 'handle_outliers', 'trim_whitespace'"
+            "'impute_missing', 'handle_outliers', 'trim_whitespace', 'custom_polars_script'"
         ),
     )
     target_columns: Optional[List[str]] = Field(
@@ -278,6 +278,22 @@ def apply_cleaning_action(
                     df = df.with_columns(df[col].str.strip_chars().alias(col))
                     trimmed.append(col)
             result["details"] = f"Trimmed whitespace on text columns: {trimmed}" if trimmed else "No string columns to trim."
+
+        elif action_type == "custom_polars_script":
+            from app.services.code_sandbox import execute_polars_code
+            code = params.get("code", "")
+            if not code:
+                result["details"] = "Failed: No code provided in custom_polars_script parameters."
+            else:
+                new_df, err = execute_polars_code(code, df)
+                if err:
+                    result["details"] = f"Dynamic script execution failed: {err}"
+                else:
+                    after_r, after_c = new_df.shape
+                    result["rows_delta"] = after_r - before_rows
+                    result["columns_delta"] = after_c - before_cols
+                    result["details"] = f"Executed dynamic Polars script successfully ({before_rows}x{before_cols} -> {after_r}x{after_c})."
+                    df = new_df
 
         else:
             result["details"] = f"Unrecognized action '{action_type}'; skipped safely."

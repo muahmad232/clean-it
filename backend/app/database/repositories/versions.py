@@ -54,6 +54,7 @@ def save_version(version_data: dict[str, Any]) -> dict[str, Any]:
         res = client.schema(SCHEMA).table(TABLE).insert(row).execute()
         saved = res.data[0] if res.data else row
         logger.info(f"Persisted version v{row['version_number']} for dataset {dataset_id}")
+        _sync_version_to_profile(dataset_id, saved)
         return saved
     except Exception as exc:
         logger.warning(f"Could not persist version to DB table ({exc}). Falling back to dataset profile_json.")
@@ -63,6 +64,7 @@ def save_version(version_data: dict[str, Any]) -> dict[str, Any]:
 def list_versions(dataset_id: str) -> list[dict[str, Any]]:
     """List all versions for a dataset sorted by version_number ASC."""
     client = get_service_client()
+    db_versions: list[dict[str, Any]] = []
     try:
         res = (
             client.schema(SCHEMA)
@@ -73,18 +75,33 @@ def list_versions(dataset_id: str) -> list[dict[str, Any]]:
             .execute()
         )
         if res.data and len(res.data) > 0:
-            return res.data
+            db_versions = res.data
     except Exception as exc:
         logger.debug(f"DB list_versions failed: {exc}. Reading from profile_json.")
 
-    # Fallback to profile_json
+    # Also check profile_json fallback
+    profile_versions: list[dict[str, Any]] = []
     try:
         ds = get_dataset(dataset_id)
         if ds:
             profile_json = ds.get("profile_json") or {}
-            return profile_json.get("versions", [])
+            profile_versions = profile_json.get("versions", [])
     except Exception as exc:
         logger.debug(f"Could not load fallback versions from dataset {dataset_id}: {exc}")
+
+    if db_versions and not profile_versions:
+        return db_versions
+    if profile_versions and not db_versions:
+        return profile_versions
+    if db_versions and profile_versions:
+        # Merge by id or version_number so no snapshots are lost
+        combined: dict[str, dict[str, Any]] = {
+            str(v.get("id") or v.get("version_number")): v for v in profile_versions
+        }
+        for v in db_versions:
+            combined[str(v.get("id") or v.get("version_number"))] = v
+        return sorted(combined.values(), key=lambda x: x.get("version_number", 0))
+
     return []
 
 
@@ -154,6 +171,16 @@ def get_current_version(dataset_id: str) -> Optional[dict[str, Any]]:
     except Exception as exc:
         logger.debug(f"DB get_current_version failed: {exc}")
 
+    # Fallback to direct profile_json
+    try:
+        ds = get_dataset(dataset_id)
+        if ds:
+            p_json = ds.get("profile_json") or {}
+            if p_json.get("current_version"):
+                return p_json["current_version"]
+    except Exception:
+        pass
+
     versions = list_versions(dataset_id)
     for v in reversed(versions):
         if v.get("is_current", False):
@@ -164,6 +191,7 @@ def get_current_version(dataset_id: str) -> Optional[dict[str, Any]]:
 def set_current_version(dataset_id: str, version_id: str) -> dict[str, Any]:
     """Set the specified version as is_current=True, and all others as False."""
     client = get_service_client()
+    matched = None
     try:
         client.schema(SCHEMA).table(TABLE).update({"is_current": False}).eq("dataset_id", dataset_id).execute()
         res = (
@@ -175,35 +203,72 @@ def set_current_version(dataset_id: str, version_id: str) -> dict[str, Any]:
             .execute()
         )
         if res.data:
-            return res.data[0]
+            matched = res.data[0]
     except Exception as exc:
         logger.debug(f"DB set_current_version failed: {exc}")
 
-    # Fallback to profile_json
+    # Keep profile_json and datasets table in sync
     ds = get_dataset(dataset_id)
     if ds:
         profile_json = ds.get("profile_json") or {}
         versions = profile_json.get("versions", [])
-        matched = None
         for v in versions:
             if v.get("id") == version_id or str(v.get("version_number")) == str(version_id):
                 v["is_current"] = True
-                matched = v
+                if not matched:
+                    matched = v
             else:
                 v["is_current"] = False
         profile_json["versions"] = versions
-        client = get_service_client()
+        if matched:
+            profile_json["current_version"] = matched
+            profile_json["version_number"] = matched.get("version_number")
         try:
-            client.schema(SCHEMA).table("datasets").update({"profile_json": profile_json}).eq("id", dataset_id).execute()
+            up: dict[str, Any] = {"profile_json": profile_json}
+            if matched and matched.get("id"):
+                up["current_version_id"] = matched.get("id")
+            client.schema(SCHEMA).table("datasets").update(up).eq("id", dataset_id).execute()
         except Exception as exc:
             logger.debug(f"Direct profile_json update failed: {exc}")
         if matched:
             return matched
 
-    return {"dataset_id": dataset_id, "id": version_id, "is_current": True}
+    return matched or {"dataset_id": dataset_id, "id": version_id, "is_current": True}
 
 
-# ── Private Profile JSON Fallback ───────────────────────────────────
+# ── Private Profile JSON Fallback & Sync ────────────────────────────
+
+def _sync_version_to_profile(dataset_id: str, row: dict[str, Any]) -> None:
+    try:
+        ds = get_dataset(dataset_id)
+        if not ds:
+            return
+        profile_json = ds.get("profile_json") or {}
+        versions = profile_json.get("versions", [])
+        updated = False
+        for v in versions:
+            if v.get("id") == row.get("id") or str(v.get("version_number")) == str(row.get("version_number")):
+                v.update(row)
+                v["is_current"] = True
+                updated = True
+            else:
+                v["is_current"] = False
+        if not updated:
+            row_copy = dict(row)
+            row_copy["is_current"] = True
+            versions.append(row_copy)
+        profile_json["versions"] = versions
+        profile_json["current_version"] = row
+        profile_json["version_number"] = row.get("version_number")
+
+        client = get_service_client()
+        up: dict[str, Any] = {"profile_json": profile_json}
+        if row.get("id"):
+            up["current_version_id"] = row.get("id")
+        client.schema(SCHEMA).table("datasets").update(up).eq("id", dataset_id).execute()
+    except Exception as exc:
+        logger.debug(f"Direct profile_json sync failed: {exc}")
+
 
 def _save_version_to_profile(dataset_id: str, row: dict[str, Any]) -> dict[str, Any]:
     try:
@@ -213,14 +278,26 @@ def _save_version_to_profile(dataset_id: str, row: dict[str, Any]) -> dict[str, 
         profile_json = ds.get("profile_json") or {}
         versions = profile_json.get("versions", [])
         # Unset is_current on existing
+        updated = False
         for v in versions:
-            v["is_current"] = False
-        row["is_current"] = True
-        versions.append(row)
+            if v.get("id") == row.get("id") or str(v.get("version_number")) == str(row.get("version_number")):
+                v.update(row)
+                v["is_current"] = True
+                updated = True
+            else:
+                v["is_current"] = False
+        if not updated:
+            row["is_current"] = True
+            versions.append(row)
         profile_json["versions"] = versions
+        profile_json["current_version"] = row
+        profile_json["version_number"] = row.get("version_number")
 
         client = get_service_client()
-        client.schema(SCHEMA).table("datasets").update({"profile_json": profile_json}).eq("id", dataset_id).execute()
+        up: dict[str, Any] = {"profile_json": profile_json}
+        if row.get("id"):
+            up["current_version_id"] = row.get("id")
+        client.schema(SCHEMA).table("datasets").update(up).eq("id", dataset_id).execute()
     except Exception as exc:
         logger.debug(f"Direct profile_json update failed: {exc}")
     return row

@@ -370,3 +370,62 @@ def test_autonomous_agent_pipeline_version_and_rollback_integration():
             assert vers_data["versions"][1]["created_by_action"] == v1["created_by_action"]
 
 
+def test_download_v0_fallback_when_no_version_record():
+    """Verify v0 download works even if no dataset_versions row exists, falling back to dataset.storage_path."""
+    mock_dataset_id = "test-v0-fallback-ds"
+    mock_project_id = "test-v0-fallback-proj"
+    mock_dataset = {
+        "id": mock_dataset_id,
+        "project_id": mock_project_id,
+        "storage_path": "0001/proj/ds/original/dataset.csv",
+        "original_filename": "titanic.csv",
+        "profile_json": {},
+    }
+
+    with patch("app.routers.versions.get_dataset", return_value=mock_dataset), \
+         patch("app.routers.versions.get_version_by_number", return_value=None), \
+         patch("app.routers.versions.download_file", return_value=SAMPLE_CSV):
+
+        # 1. Download v0 as CSV
+        res_csv = client.get(f"/api/v1/projects/{mock_project_id}/datasets/{mock_dataset_id}/versions/0/download?format=csv")
+        assert res_csv.status_code == 200
+        assert res_csv.content == SAMPLE_CSV
+        assert "titanic_v0.csv" in res_csv.headers.get("content-disposition", "")
+
+        # 2. Download v0 as Parquet (transcoded from CSV)
+        res_pq = client.get(f"/api/v1/projects/{mock_project_id}/datasets/{mock_dataset_id}/versions/0/download?format=parquet")
+        assert res_pq.status_code == 200
+        assert res_pq.content[:4] == b"PAR1"
+        assert "titanic_v0.parquet" in res_pq.headers.get("content-disposition", "")
+
+
+def test_download_transcodes_parquet_to_csv():
+    """Verify downloading as CSV when stored snapshot is Parquet transcodes correctly."""
+    from app.services.versioning import convert_to_parquet
+    parquet_bytes = convert_to_parquet(SAMPLE_CSV, "csv")
+
+    mock_dataset_id = "test-pq-to-csv-ds"
+    mock_project_id = "test-pq-to-csv-proj"
+    mock_dataset = {
+        "id": mock_dataset_id,
+        "project_id": mock_project_id,
+        "original_filename": "data.csv",
+        "profile_json": {
+            "current_version": {
+                "version_number": 1,
+                "storage_path": "datasets/versions/test/v1.parquet",
+            }
+        },
+    }
+
+    with patch("app.routers.versions.get_dataset", return_value=mock_dataset), \
+         patch("app.routers.versions.get_version_by_number", return_value=mock_dataset["profile_json"]["current_version"]), \
+         patch("app.routers.versions.download_file", return_value=parquet_bytes):
+
+        res = client.get(f"/api/v1/projects/{mock_project_id}/datasets/{mock_dataset_id}/versions/1/download?format=csv")
+        assert res.status_code == 200
+        assert b"age" in res.content
+        assert res.headers["content-type"].startswith("text/csv")
+
+
+

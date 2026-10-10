@@ -135,3 +135,5 @@ class SelfHealingOrchestrationReport(BaseModel):
     final_metrics: Dict[str, Any] = Field(default_factory=dict)
     cleaned_bytes: Optional[bytes] = None
     final_profile: Dict[str, Any] = Field(default_factory=dict)
+    user_instructions: Optional[str] = None
+    custom_scripts_executed: List[Dict[str, Any]] = Field(default_factory=list)

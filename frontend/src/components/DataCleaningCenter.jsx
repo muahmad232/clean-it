@@ -28,6 +28,10 @@ import {
   TrendingUp,
   TrendingDown,
   BarChart2,
+  MessageSquare,
+  Send,
+  Copy,
+  Code,
 } from 'lucide-react'
 import {
   cleanDataset,
@@ -41,6 +45,8 @@ import {
   submitApprovalDecision,
   fetchDatasetComparison,
   runSelfHealingClean,
+  chatCleanDataset,
+  downloadDatasetVersion,
 } from '../api'
 
 export default function DataCleaningCenter({
@@ -106,6 +112,13 @@ export default function DataCleaningCenter({
   const [compareVersionA, setCompareVersionA] = useState('')
   const [compareVersionB, setCompareVersionB] = useState('')
 
+  // Phase 16: Chat-Driven Autonomous Pipeline & Dynamic Functions State
+  const [chatInstructions, setChatInstructions] = useState('')
+  const [chatLoading, setChatLoading] = useState(false)
+  const [chatError, setChatError] = useState(null)
+  const [chatHistory, setChatHistory] = useState([])
+  const [copiedScriptId, setCopiedScriptId] = useState(null)
+
   const loadComparison = async (vOld = null, vNew = null) => {
     if (!dataset?.id) return
     setComparisonLoading(true)
@@ -160,9 +173,17 @@ export default function DataCleaningCenter({
   }
 
   useEffect(() => {
+    if (profile?.current_version) {
+      setCurrentVersion(profile.current_version)
+    } else if (dataset?.current_version) {
+      setCurrentVersion(dataset.current_version)
+    }
+    if (profile?.versions && profile.versions.length > 0) {
+      setVersionsList(profile.versions)
+    }
     loadVersions()
     loadApprovals()
-  }, [dataset?.id])
+  }, [dataset?.id, dataset?.current_version_id, profile?.version_number])
 
   // ── Handler 1: Autonomous Multi-Step AI Agent Cleaning Loop (Phase 14 Self-Healing) ───────
   const handleRunAgentLoop = async () => {
@@ -246,10 +267,33 @@ export default function DataCleaningCenter({
       setPendingApprovals(remainingApprovals)
       if (res.version) {
         setCurrentVersion(res.version)
+        setVersionsList((prev) => {
+          const exists = prev.some((v) => v.id === res.version.id || v.version_number === res.version.version_number)
+          return exists
+            ? prev.map((v) => (v.id === res.version.id || v.version_number === res.version.version_number ? res.version : v))
+            : [...prev, res.version]
+        })
       }
       if (res.comparison) {
         setComparisonReport(res.comparison)
       }
+
+      // Update chatHistory items so in-stream approvals reflect the new version
+      setChatHistory((prev) =>
+        prev.map((entry) => {
+          if (entry.status === 'WAITING_APPROVAL') {
+            const rem = (entry.pending_approvals || []).filter((a) => a.id !== actionId)
+            return {
+              ...entry,
+              status: rem.length === 0 ? 'CLEANED' : 'WAITING_APPROVAL',
+              pending_approvals: rem,
+              version: res.version || entry.version,
+              comparison: res.comparison || entry.comparison,
+            }
+          }
+          return entry
+        })
+      )
 
       // Transition agentResult state out of paused status
       setAgentResult((prev) => {
@@ -455,8 +499,112 @@ export default function DataCleaningCenter({
     }
   }
 
+  // ── Handler 5: Phase 16 Chat-Driven Cleaning with Dynamic Functions ──
+  const handleRunChatClean = async (promptOverride = null) => {
+    const textToRun = (promptOverride || chatInstructions).trim()
+    if (!textToRun || !dataset?.id) return
+    setChatLoading(true)
+    setChatError(null)
+    try {
+      const res = await chatCleanDataset(
+        projectId || dataset.project_id,
+        dataset.id,
+        {
+          user_instructions: textToRun,
+          task_objective: selectedTask,
+          target_column: targetColumn.trim() || null,
+          require_approval: requireApproval,
+          max_iterations: maxIterations,
+        }
+      )
+
+      const historyEntry = {
+        id: Date.now(),
+        user_prompt: textToRun,
+        timestamp: new Date().toLocaleTimeString(),
+        status: res.status,
+        report: res.report,
+        custom_scripts: res.custom_scripts || [],
+        pending_approvals: res.pending_approvals || [],
+        total_rollbacks: res.total_rollbacks || 0,
+        version: res.version,
+        comparison: res.comparison,
+        termination_reason: res.termination_reason || 'Execution finished',
+      }
+
+      setChatHistory((prev) => [historyEntry, ...prev])
+      setChatInstructions('')
+
+      const newVer = res.version || res.final_profile?.current_version || null
+      if (newVer) {
+        setCurrentVersion(newVer)
+        setVersionsList((prev) => {
+          const exists = prev.some((v) => v.id === newVer.id || v.version_number === newVer.version_number)
+          return exists
+            ? prev.map((v) => (v.id === newVer.id || v.version_number === newVer.version_number ? newVer : v))
+            : [...prev, newVer]
+        })
+      }
+
+      if (res.status === 'WAITING_APPROVAL') {
+        setPendingApprovals(res.pending_approvals || [])
+      } else {
+        if (res.comparison) {
+          setComparisonReport(res.comparison)
+        }
+        if (onDatasetCleaned) {
+          onDatasetCleaned(res)
+        }
+        await loadVersions()
+      }
+    } catch (err) {
+      console.error('Chat cleaning error:', err)
+      setChatError(err.message || 'Chat-guided cleaning failed.')
+    } finally {
+      setChatLoading(false)
+    }
+  }
+
+  const handleCopyCode = (code, id) => {
+    if (!code) return
+    navigator.clipboard.writeText(code)
+    setCopiedScriptId(id)
+    setTimeout(() => setCopiedScriptId(null), 2000)
+  }
+
   const downloadUrl = getDownloadUrl(projectId || dataset?.project_id, dataset?.id)
   const isAnyCleaningActive = agentLoading || instantLoading || diagnosticLoading
+
+  const [downloadingVersion, setDownloadingVersion] = useState(null)
+
+  const handleDownloadVersion = async (versionNumber, format = 'csv') => {
+    const key = `${versionNumber}_${format}`
+    setDownloadingVersion(key)
+    try {
+      const pId = projectId || dataset?.project_id
+      const dId = dataset?.id
+      if (!dId) return
+
+      const blob = await downloadDatasetVersion(pId, dId, versionNumber, format)
+      const baseName = (dataset?.original_filename || 'dataset').replace(/\.[^/.]+$/, '')
+      const ext = format === 'parquet' ? 'parquet' : 'csv'
+      const fileName = `${baseName}_v${versionNumber ?? 0}.${ext}`
+
+      const blobUrl = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = blobUrl
+      a.download = fileName
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      window.URL.revokeObjectURL(blobUrl)
+    } catch (err) {
+      console.error('Download version failed:', err)
+      alert(`Could not download version v${versionNumber}: ${err.message}`)
+    } finally {
+      setDownloadingVersion(null)
+    }
+  }
 
   const getGradeColor = (grade = '') => {
     const g = String(grade).toUpperCase()
@@ -512,17 +660,18 @@ export default function DataCleaningCenter({
           <div>
             <h3 style={{ fontSize: '1.05rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
               Data Cleaning & Export Center
-              <span className="badge badge-muted" style={{ fontSize: '0.7rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                <Layers size={11} /> v{currentVersion?.version_number ?? 0}
+              <span className="badge badge-muted" style={{ fontSize: '0.7rem', display: 'flex', alignItems: 'center', gap: '0.25rem', borderColor: (currentVersion?.version_number ?? 0) > 0 ? 'var(--emerald-primary)' : undefined }}>
+                <Layers size={11} color={(currentVersion?.version_number ?? 0) > 0 ? 'var(--emerald-primary)' : undefined} />
+                v{currentVersion?.version_number ?? (profile?.version_number ?? (dataset?.version_number ?? 0))}
               </span>
               {pendingApprovals.length > 0 && (
                 <span className="badge badge-amber" style={{ fontSize: '0.7rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
                   <ShieldAlert size={11} /> {pendingApprovals.length} Approval Required
                 </span>
               )}
-              {(agentResult || instantReport) && (
-                <span className="badge badge-green" style={{ fontSize: '0.7rem' }}>
-                  <Check size={11} /> Cleaned
+              {(agentResult || instantReport || chatHistory.some((c) => c.status === 'CLEANED' || c.status === 'CONVERGED') || (currentVersion?.version_number ?? 0) > 0) && (
+                <span className="badge badge-green" style={{ fontSize: '0.7rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                  <Check size={11} /> Cleaned (v{currentVersion?.version_number ?? (profile?.version_number ?? 1)})
                 </span>
               )}
             </h3>
@@ -563,6 +712,24 @@ export default function DataCleaningCenter({
             )}
           </button>
           <button
+            onClick={() => setActiveMode('chat_clean')}
+            className={`btn btn-xs ${activeMode === 'chat_clean' ? 'btn-primary' : 'btn-ghost'}`}
+            style={{ fontSize: '0.75rem', padding: '0.25rem 0.65rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}
+          >
+            <MessageSquare size={12} color={activeMode === 'chat_clean' ? 'inherit' : 'var(--emerald-primary)'} />
+            Chat & Custom Tasks
+            <span style={{
+              background: 'rgba(99, 102, 241, 0.2)',
+              color: '#818cf8',
+              borderRadius: '4px',
+              padding: '0.05rem 0.3rem',
+              fontSize: '0.62rem',
+              fontWeight: 700,
+            }}>
+              P16
+            </span>
+          </button>
+          <button
             onClick={() => setActiveMode('instant_deterministic')}
             className={`btn btn-xs ${activeMode === 'instant_deterministic' ? 'btn-primary' : 'btn-ghost'}`}
             style={{ fontSize: '0.75rem', padding: '0.25rem 0.65rem' }}
@@ -581,7 +748,7 @@ export default function DataCleaningCenter({
             className={`btn btn-xs ${activeMode === 'version_history' ? 'btn-primary' : 'btn-ghost'}`}
             style={{ fontSize: '0.75rem', padding: '0.25rem 0.65rem' }}
           >
-            <History size={12} /> History & Rollback ({versionsList.length || 1})
+            <History size={12} /> History & Rollback ({versionsList.length || (currentVersion?.version_number !== undefined ? currentVersion.version_number + 1 : 1)})
           </button>
           <button
             onClick={() => {
@@ -2063,18 +2230,26 @@ export default function DataCleaningCenter({
                         <a
                           href={getVersionDownloadUrl(projectId || dataset.project_id, dataset.id, v.version_number, 'csv')}
                           download
+                          onClick={(e) => {
+                            e.preventDefault()
+                            handleDownloadVersion(v.version_number, 'csv')
+                          }}
                           className="btn btn-xs btn-outline"
                           style={{ fontSize: '0.72rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}
                         >
-                          <Download size={11} /> CSV
+                          <Download size={11} /> {downloadingVersion === `${v.version_number}_csv` ? 'Downloading...' : 'CSV'}
                         </a>
                         <a
                           href={getVersionDownloadUrl(projectId || dataset.project_id, dataset.id, v.version_number, 'parquet')}
                           download
+                          onClick={(e) => {
+                            e.preventDefault()
+                            handleDownloadVersion(v.version_number, 'parquet')
+                          }}
                           className="btn btn-xs btn-outline"
                           style={{ fontSize: '0.72rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}
                         >
-                          <Download size={11} /> Parquet
+                          <Download size={11} /> {downloadingVersion === `${v.version_number}_parquet` ? 'Downloading...' : 'Parquet'}
                         </a>
                       </div>
 
@@ -2453,6 +2628,650 @@ export default function DataCleaningCenter({
                   )}
                 </div>
               </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ══════════════════════════════════════════════════════════════ */}
+      {/* MODE 6: Chat Assistant & Custom Tasks (Phase 16)               */}
+      {/* ══════════════════════════════════════════════════════════════ */}
+      {activeMode === 'chat_clean' && (
+        <div style={{
+          background: 'var(--bg-surface)',
+          border: '1px solid var(--border-medium)',
+          borderRadius: 'var(--radius-sm)',
+          padding: '1.25rem',
+          marginBottom: '1rem',
+        }}>
+          {/* Header */}
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '0.75rem',
+            marginBottom: '1.2rem',
+            paddingBottom: '0.85rem',
+            borderBottom: '1px solid var(--border-subtle)',
+          }}>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.2rem' }}>
+                <span style={{ fontWeight: 600, fontSize: '0.95rem', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <MessageSquare size={16} color="var(--emerald-primary)" />
+                  Intent-Guided Autonomous Chat Cleaning
+                </span>
+                <span className="badge badge-muted" style={{ fontSize: '0.7rem' }}>
+                  Phase 16
+                </span>
+              </div>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '0.78rem', margin: 0 }}>
+                Tell the AI what tasks or custom requirements to perform. The agent remediates defects, writes safe dynamic Polars functions when needed, prompts for approval, and self-heals with automated rollback.
+              </p>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <span className="badge badge-muted" style={{ fontSize: '0.7rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                <ShieldCheck size={12} color="var(--emerald-primary)" /> AST Sandbox Guard Active
+              </span>
+            </div>
+          </div>
+
+          {/* Active Working Dataset Version Status Bar */}
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '0.5rem',
+            background: 'var(--bg-main)',
+            border: '1px solid var(--border-medium)',
+            borderRadius: 'var(--radius-sm)',
+            padding: '0.55rem 0.85rem',
+            marginBottom: '1rem',
+            fontSize: '0.78rem',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+              <span
+                className="badge badge-green"
+                style={{
+                  fontSize: '0.72rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.3rem',
+                  padding: '0.2rem 0.5rem',
+                  fontWeight: 600,
+                }}
+              >
+                <Layers size={11} /> Active Dataset: v{currentVersion?.version_number ?? (profile?.version_number ?? 0)}
+              </span>
+              <span style={{ color: 'var(--text-primary)', fontWeight: 500, fontSize: '0.76rem' }}>
+                {currentVersion?.created_by_action || (currentVersion?.version_number === 0 ? 'Initial Dataset Ingest (v0 Original)' : 'Current Ingested State')}
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <button
+                type="button"
+                onClick={() => setActiveMode('version_history')}
+                className="btn btn-xs btn-ghost"
+                style={{ fontSize: '0.72rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
+              >
+                <History size={11} /> View Version Lineage ({versionsList.length || 1})
+              </button>
+              <a
+                href={getVersionDownloadUrl(projectId || dataset?.project_id, dataset?.id, currentVersion?.version_number ?? (profile?.version_number ?? 0), 'csv')}
+                download
+                onClick={(e) => {
+                  e.preventDefault()
+                  handleDownloadVersion(currentVersion?.version_number ?? (profile?.version_number ?? 0), 'csv')
+                }}
+                className="btn btn-xs btn-outline"
+                style={{ fontSize: '0.72rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
+              >
+                <Download size={11} /> {downloadingVersion === `${currentVersion?.version_number ?? (profile?.version_number ?? 0)}_csv` ? 'Downloading...' : `Download v${currentVersion?.version_number ?? (profile?.version_number ?? 0)} CSV`}
+              </a>
+            </div>
+          </div>
+
+          {/* Interactive Chat Input Area */}
+          <div style={{
+            background: 'var(--bg-main)',
+            border: '1px solid var(--border-medium)',
+            borderRadius: 'var(--radius-sm)',
+            padding: '1rem',
+            marginBottom: '1.25rem',
+          }}>
+            <label style={{
+              display: 'block',
+              fontSize: '0.8rem',
+              fontWeight: 600,
+              color: 'var(--text-primary)',
+              marginBottom: '0.5rem',
+            }}>
+              Your Task Objectives & Requirements:
+            </label>
+
+            <textarea
+              value={chatInstructions}
+              onChange={(e) => setChatInstructions(e.target.value)}
+              placeholder="e.g. Prepare this dataset for churn prediction: drop customer IDs, cap tenure outliers, fill missing charges with median, and engineer a charge_per_tenure ratio column..."
+              rows={3}
+              style={{
+                width: '100%',
+                background: 'var(--bg-surface)',
+                border: '1px solid var(--border-medium)',
+                borderRadius: 'var(--radius-sm)',
+                padding: '0.65rem 0.85rem',
+                fontSize: '0.82rem',
+                color: 'var(--text-primary)',
+                fontFamily: 'inherit',
+                resize: 'vertical',
+                outline: 'none',
+                marginBottom: '0.75rem',
+              }}
+            />
+
+            {/* Quick Prompt Presets */}
+            <div style={{ marginBottom: '0.85rem' }}>
+              <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
+                Quick Task Templates (Click to fill):
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
+                {[
+                  {
+                    label: '🚀 Churn ML Prep',
+                    text: 'Prepare for ML classification: drop surrogate IDs, impute missing values with median/mode, and cap numerical outliers.',
+                  },
+                  {
+                    label: '🧮 Feature Engineering Ratio',
+                    text: 'Engineer a new derived feature column calculating the ratio of numerical columns and clip negative values.',
+                  },
+                  {
+                    label: '📅 Standardize Dates & Text',
+                    text: 'Standardize all inconsistent date formats to ISO-8601 YYYY-MM-DD, trim text whitespace, and drop constant columns.',
+                  },
+                  {
+                    label: '🏷️ Non-Negative Bounds',
+                    text: 'Enforce domain range bounds: clip price and quantity columns to be non-negative (>= 0) and remove extreme anomalies.',
+                  },
+                ].map((preset, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => setChatInstructions(preset.text)}
+                    className="btn btn-xs btn-ghost"
+                    style={{
+                      fontSize: '0.7rem',
+                      padding: '0.2rem 0.5rem',
+                      border: '1px solid var(--border-subtle)',
+                      background: 'var(--bg-subtle)',
+                      borderRadius: 'var(--radius-sm)',
+                    }}
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Controls Row */}
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: '0.75rem',
+              paddingTop: '0.5rem',
+              borderTop: '1px solid var(--border-subtle)',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
+                <label style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.4rem',
+                  fontSize: '0.76rem',
+                  color: 'var(--text-secondary)',
+                  cursor: 'pointer',
+                }}>
+                  <input
+                    type="checkbox"
+                    checked={requireApproval}
+                    onChange={(e) => setRequireApproval(e.target.checked)}
+                    style={{ accentColor: 'var(--emerald-primary)' }}
+                  />
+                  <span>Require Approval for Custom Scripts & High Risk</span>
+                </label>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.76rem', color: 'var(--text-secondary)' }}>
+                  <span>Max Iterations:</span>
+                  <select
+                    value={maxIterations}
+                    onChange={(e) => setMaxIterations(Number(e.target.value))}
+                    style={{
+                      background: 'var(--bg-surface)',
+                      border: '1px solid var(--border-subtle)',
+                      borderRadius: 'var(--radius-sm)',
+                      padding: '0.15rem 0.4rem',
+                      fontSize: '0.75rem',
+                      color: 'var(--text-primary)',
+                    }}
+                  >
+                    {[1, 2, 3, 4, 5].map((n) => (
+                      <option key={n} value={n}>{n} {n === 1 ? 'iteration' : 'iterations'}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <button
+                onClick={() => handleRunChatClean()}
+                disabled={chatLoading || !chatInstructions.trim()}
+                className="btn btn-sm btn-primary"
+                style={{
+                  fontSize: '0.78rem',
+                  padding: '0.35rem 0.95rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.4rem',
+                }}
+              >
+                {chatLoading ? (
+                  <>
+                    <Loader2 size={13} className="spin" />
+                    <span>Executing Pipeline...</span>
+                  </>
+                ) : (
+                  <>
+                    <Send size={13} />
+                    <span>Run Chat-Guided Cleaning</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            {chatError && (
+              <div style={{
+                marginTop: '0.75rem',
+                padding: '0.6rem 0.85rem',
+                background: 'rgba(244, 63, 94, 0.1)',
+                border: '1px solid rgba(244, 63, 94, 0.25)',
+                borderRadius: 'var(--radius-sm)',
+                color: '#f43f5e',
+                fontSize: '0.78rem',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.4rem',
+              }}>
+                <AlertTriangle size={14} />
+                <span>{chatError}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Conversation Stream & Telemetry */}
+          {chatHistory.length > 0 ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+              <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
+                Session Run History ({chatHistory.length})
+              </div>
+
+              {chatHistory.map((item) => (
+                <div
+                  key={item.id}
+                  style={{
+                    background: 'var(--bg-main)',
+                    border: '1px solid var(--border-medium)',
+                    borderRadius: 'var(--radius-sm)',
+                    padding: '1rem',
+                  }}
+                >
+                  {/* User Request Bubble */}
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: '0.65rem',
+                    marginBottom: '0.85rem',
+                    paddingBottom: '0.75rem',
+                    borderBottom: '1px solid var(--border-subtle)',
+                  }}>
+                    <div style={{
+                      background: 'rgba(99, 102, 241, 0.15)',
+                      padding: '0.35rem',
+                      borderRadius: '50%',
+                      color: '#818cf8',
+                    }}>
+                      <Bot size={15} />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.2rem' }}>
+                        <span style={{ fontSize: '0.76rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                          User Task Prompt
+                        </span>
+                        <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>
+                          {item.timestamp}
+                        </span>
+                      </div>
+                      <p style={{ fontSize: '0.82rem', color: 'var(--text-primary)', margin: 0, fontStyle: 'italic' }}>
+                        "{item.user_prompt}"
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Status Banner */}
+                  <div style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                    gap: '0.5rem',
+                    marginBottom: '0.75rem',
+                    padding: '0.5rem 0.75rem',
+                    background: item.status === 'WAITING_APPROVAL'
+                      ? 'rgba(245, 158, 11, 0.1)'
+                      : item.status === 'CONVERGED' || item.status === 'CLEANED'
+                      ? 'rgba(16, 185, 129, 0.1)'
+                      : 'rgba(56, 189, 248, 0.1)',
+                    border: `1px solid ${
+                      item.status === 'WAITING_APPROVAL'
+                        ? 'rgba(245, 158, 11, 0.3)'
+                        : item.status === 'CONVERGED' || item.status === 'CLEANED'
+                        ? 'rgba(16, 185, 129, 0.3)'
+                        : 'rgba(56, 189, 248, 0.3)'
+                    }`,
+                    borderRadius: 'var(--radius-sm)',
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.76rem', fontWeight: 600 }}>
+                      {item.status === 'WAITING_APPROVAL' ? (
+                        <>
+                          <ShieldAlert size={14} color="#f59e0b" />
+                          <span style={{ color: '#f59e0b' }}>Status: Awaiting Human Approval</span>
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle2 size={14} color="var(--emerald-primary)" />
+                          <span style={{ color: 'var(--emerald-primary)' }}>Status: {item.status}</span>
+                        </>
+                      )}
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', fontSize: '0.72rem' }}>
+                      {item.report?.overall_quality_improvement !== undefined && (
+                        <span style={{
+                          fontWeight: 700,
+                          color: item.report.overall_quality_improvement >= 0 ? 'var(--emerald-primary)' : '#f43f5e',
+                        }}>
+                          Quality Delta: {item.report.overall_quality_improvement >= 0 ? `+${item.report.overall_quality_improvement}` : item.report.overall_quality_improvement} pts
+                        </span>
+                      )}
+                      {item.total_rollbacks > 0 && (
+                        <span className="badge badge-amber" style={{ fontSize: '0.68rem' }}>
+                          <RotateCcw size={10} /> {item.total_rollbacks} Auto-Rollbacks
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Termination & Rationale */}
+                  <div style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
+                    <strong>Agent Outcome:</strong> {item.termination_reason}
+                  </div>
+
+                  {/* Custom Polars Scripts Section */}
+                  {item.custom_scripts && item.custom_scripts.length > 0 && (
+                    <div style={{ marginBottom: '0.85rem' }}>
+                      <div style={{ fontSize: '0.74rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.4rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                        <Code size={13} color="var(--emerald-primary)" />
+                        Custom Dynamic Polars Transformation Functions ({item.custom_scripts.length})
+                      </div>
+
+                      {item.custom_scripts.map((script, sIdx) => (
+                        <div
+                          key={sIdx}
+                          style={{
+                            background: '#0f172a',
+                            border: '1px solid #1e293b',
+                            borderRadius: 'var(--radius-sm)',
+                            padding: '0.75rem',
+                            marginBottom: '0.5rem',
+                          }}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem', flexWrap: 'wrap', gap: '0.4rem' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                              <span style={{ color: '#38bdf8', fontWeight: 600, fontSize: '0.76rem', fontFamily: 'monospace' }}>
+                                def {script.function_name || 'transform'}(df: pl.DataFrame) -&gt; pl.DataFrame:
+                              </span>
+                              {script.is_safe && (
+                                <span style={{
+                                  background: 'rgba(16, 185, 129, 0.2)',
+                                  color: 'var(--emerald-primary)',
+                                  fontSize: '0.65rem',
+                                  padding: '0.1rem 0.35rem',
+                                  borderRadius: '3px',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '0.2rem',
+                                }}>
+                                  <ShieldCheck size={10} /> AST Sandbox Verified
+                                </span>
+                              )}
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => handleCopyCode(script.code, `${item.id}-${sIdx}`)}
+                              className="btn btn-xs btn-ghost"
+                              style={{
+                                color: '#94a3b8',
+                                fontSize: '0.68rem',
+                                padding: '0.15rem 0.4rem',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.25rem',
+                              }}
+                            >
+                              <Copy size={11} />
+                              {copiedScriptId === `${item.id}-${sIdx}` ? 'Copied!' : 'Copy Code'}
+                            </button>
+                          </div>
+
+                          {script.description && (
+                            <p style={{ fontSize: '0.72rem', color: '#94a3b8', margin: '0 0 0.4rem 0' }}>
+                              {script.description}
+                            </p>
+                          )}
+
+                          <pre style={{
+                            margin: 0,
+                            fontSize: '0.75rem',
+                            color: '#e2e8f0',
+                            fontFamily: 'monospace',
+                            overflowX: 'auto',
+                            background: 'rgba(0, 0, 0, 0.3)',
+                            padding: '0.5rem',
+                            borderRadius: '4px',
+                          }}>
+                            <code>{script.code || '# No code generated'}</code>
+                          </pre>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Pending Approvals In-Stream Card */}
+                  {item.status === 'WAITING_APPROVAL' && pendingApprovals.length > 0 && (
+                    <div style={{
+                      background: 'rgba(245, 158, 11, 0.08)',
+                      border: '1px solid rgba(245, 158, 11, 0.3)',
+                      borderRadius: 'var(--radius-sm)',
+                      padding: '0.85rem',
+                      marginBottom: '0.75rem',
+                    }}>
+                      <div style={{ fontSize: '0.76rem', fontWeight: 600, color: '#f59e0b', marginBottom: '0.4rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                        <ShieldAlert size={14} /> Action Requires Human Sign-Off
+                      </div>
+                      <p style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', margin: '0 0 0.6rem 0' }}>
+                        The agent generated high-risk transformations or custom code. Click Approve to execute safely inside the Polars sandbox with rollback guards.
+                      </p>
+                      <div style={{ display: 'flex', gap: '0.5rem' }}>
+                        {pendingApprovals.map((appr) => (
+                          <div key={appr.id} style={{ display: 'flex', gap: '0.4rem' }}>
+                            <button
+                              onClick={() => handleApproveAction(appr.id)}
+                              disabled={Boolean(approvalActionInProgress)}
+                              className="btn btn-xs btn-primary"
+                              style={{ fontSize: '0.72rem' }}
+                            >
+                              Approve & Execute ({appr.action_type})
+                            </button>
+                            <button
+                              onClick={() => handleRejectAction(appr.id)}
+                              disabled={Boolean(approvalActionInProgress)}
+                              className="btn btn-xs btn-ghost"
+                              style={{ fontSize: '0.72rem', color: '#f43f5e' }}
+                            >
+                              Reject & Skip
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Prominent Version Snapshot Card & Navigation */}
+                  {item.version && (
+                    <div style={{
+                      background: 'rgba(16, 185, 129, 0.08)',
+                      border: '1px solid rgba(16, 185, 129, 0.3)',
+                      borderRadius: 'var(--radius-sm)',
+                      padding: '0.75rem 0.85rem',
+                      marginTop: '0.75rem',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '0.5rem',
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
+                          <span
+                            className="badge badge-green"
+                            style={{
+                              fontSize: '0.72rem',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '0.25rem',
+                              padding: '0.15rem 0.45rem',
+                              fontWeight: 700,
+                            }}
+                          >
+                            <Layers size={11} /> Version v{item.version.version_number} Snapshot Created
+                          </span>
+                          <span style={{ fontSize: '0.74rem', color: 'var(--text-secondary)' }}>
+                            {item.version.created_by_action || 'Chat Dynamic Pipeline Transformation'}
+                          </span>
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                          <button
+                            type="button"
+                            onClick={() => setActiveMode('version_history')}
+                            className="btn btn-xs btn-primary"
+                            style={{
+                              fontSize: '0.7rem',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '0.25rem',
+                              padding: '0.2rem 0.5rem',
+                            }}
+                          >
+                            <History size={11} /> View in History & Rollback
+                          </button>
+                          <a
+                            href={getVersionDownloadUrl(projectId || dataset?.project_id, dataset?.id, item.version?.version_number ?? 1, 'csv')}
+                            download
+                            onClick={(e) => {
+                              e.preventDefault()
+                              handleDownloadVersion(item.version?.version_number ?? 1, 'csv')
+                            }}
+                            className="btn btn-xs btn-outline"
+                            style={{
+                              fontSize: '0.7rem',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '0.2rem',
+                              padding: '0.2rem 0.45rem',
+                            }}
+                          >
+                            <Download size={11} /> {downloadingVersion === `${item.version?.version_number ?? 1}_csv` ? 'Downloading...' : 'CSV'}
+                          </a>
+                          <a
+                            href={getVersionDownloadUrl(projectId || dataset?.project_id, dataset?.id, item.version?.version_number ?? 1, 'parquet')}
+                            download
+                            onClick={(e) => {
+                              e.preventDefault()
+                              handleDownloadVersion(item.version?.version_number ?? 1, 'parquet')
+                            }}
+                            className="btn btn-xs btn-ghost"
+                            style={{
+                              fontSize: '0.7rem',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '0.2rem',
+                              padding: '0.2rem 0.45rem',
+                            }}
+                          >
+                            <Download size={11} /> {downloadingVersion === `${item.version?.version_number ?? 1}_parquet` ? 'Downloading...' : 'Parquet'}
+                          </a>
+                        </div>
+                      </div>
+
+                      {item.version.metrics_json && (
+                        <div style={{ display: 'flex', gap: '1rem', fontSize: '0.72rem', color: 'var(--text-secondary)', flexWrap: 'wrap' }}>
+                          <span>Rows: <strong style={{ color: 'var(--text-primary)' }}>{item.version.metrics_json.rows ?? 0}</strong></span>
+                          <span>Columns: <strong style={{ color: 'var(--text-primary)' }}>{item.version.metrics_json.columns ?? 0}</strong></span>
+                          <span>Nulls Remaining: <strong style={{ color: 'var(--text-primary)' }}>{item.version.metrics_json.total_null_pct ?? 0}%</strong></span>
+                          {item.version.quality_score !== undefined && (
+                            <span>Quality Score: <strong style={{ color: 'var(--emerald-primary)' }}>{item.version.quality_score}</strong></span>
+                          )}
+                        </div>
+                      )}
+
+                      <div style={{
+                        display: 'flex',
+                        justifyContent: 'flex-end',
+                        paddingTop: '0.35rem',
+                        borderTop: '1px solid rgba(16, 185, 129, 0.15)',
+                      }}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveMode('comparison')
+                            loadComparison()
+                          }}
+                          className="btn btn-xs btn-ghost"
+                          style={{ fontSize: '0.7rem', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
+                        >
+                          <GitCompare size={11} /> View Before/After Comparison Diff
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div style={{
+              textAlign: 'center',
+              padding: '2rem 1rem',
+              color: 'var(--text-muted)',
+              fontSize: '0.8rem',
+            }}>
+              <MessageSquare size={32} style={{ margin: '0 auto 0.75rem', opacity: 0.4 }} />
+              <p style={{ margin: '0 0 0.35rem 0', fontWeight: 600, color: 'var(--text-secondary)' }}>
+                No chat cleaning tasks run yet.
+              </p>
+              <p style={{ margin: 0, fontSize: '0.75rem' }}>
+                Type your dataset requirements above or select a Quick Task Template to start.
+              </p>
             </div>
           )}
         </div>

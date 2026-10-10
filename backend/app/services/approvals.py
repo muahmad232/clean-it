@@ -40,6 +40,7 @@ HIGH_RISK_ACTIONS = {
     "drop_high_null_columns",
     "drop_constant_columns",
     "remove_outliers",
+    "custom_polars_script",
 }
 
 MEDIUM_RISK_ACTIONS = {
@@ -326,6 +327,11 @@ def resolve_user_approval(
 
             comparison_report = comparison.to_dict()
             profile_json["latest_comparison"] = comparison_report
+            if new_version:
+                final_profile["current_version"] = new_version
+                final_profile["version_number"] = new_version.get("version_number")
+                profile_json["current_version"] = new_version
+                profile_json["version_number"] = new_version.get("version_number")
             update_dataset_profile(dataset_id, profile_json)
         except Exception as exc:
             logger.warning(f"Could not compute comparison for approved action: {exc}")
@@ -349,9 +355,10 @@ def resolve_user_approval(
 
     try:
         client = get_service_client()
-        client.schema("data_agent").table("datasets").update({
-            "status": dataset_status
-        }).eq("id", dataset_id).execute()
+        up_fields: dict[str, Any] = {"status": dataset_status}
+        if new_version and new_version.get("id"):
+            up_fields["current_version_id"] = new_version.get("id")
+        client.schema("data_agent").table("datasets").update(up_fields).eq("id", dataset_id).execute()
     except Exception as exc:
         logger.warning(f"Could not update dataset status after approval decision: {exc}")
 
