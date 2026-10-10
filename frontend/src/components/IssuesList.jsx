@@ -32,6 +32,18 @@ export default function IssuesList({ issues = [] }) {
         return `Deterministic Tool: target_encode('${col}') or top_k_group()`
       case 'TYPE_MISMATCH':
         return `Deterministic Tool: cast_type('${col}')`
+      case 'OUTLIER':
+        return `Deterministic Tool: clip_outliers('${col}') or remove_outliers('${col}')`
+      case 'INVALID_RANGE':
+        return `Deterministic Tool: clip_range('${col}') or filter_invalid('${col}')`
+      case 'DISTRIBUTION_SHIFT':
+        return `Deterministic Tool: review_drift('${col}') or align_distributions()`
+      case 'CLASS_IMBALANCE':
+        return `Deterministic Tool: reweight_classes('${col}') or resample()`
+      case 'TARGET_LEAKAGE':
+        return `Deterministic Tool: drop_columns(['${col}']) [CRITICAL ML GUARD]`
+      case 'DATE_PARSE_ERROR':
+        return `Deterministic Tool: parse_dates('${col}') or standardize_date_formats()`
       default:
         return 'Deterministic pipeline transformation'
     }

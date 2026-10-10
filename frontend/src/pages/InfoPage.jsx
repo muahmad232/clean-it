@@ -54,6 +54,42 @@ export default function InfoPage() {
       severity: "HIGH (≥95%) | MEDIUM (≥80%)",
       explanation: "Ingestion artifacts where numeric or timestamp values were misinferred as strings during CSV parsing."
     },
+    {
+      name: "OUTLIER",
+      condition: "Values outside IQR bounds [Q1 - 1.5*IQR, Q3 + 1.5*IQR] or |z| > 3.0",
+      severity: "HIGH (≥10% or extreme) | MEDIUM (≥3%) | LOW",
+      explanation: "Extreme observations that distort statistical estimators, variance, and distance-based ML models."
+    },
+    {
+      name: "INVALID_RANGE",
+      condition: "Values violating domain constraints (age ∉ [0, 125], % ∉ [0, 100], price < 0)",
+      severity: "HIGH (≥10%) | MEDIUM (≥1%) | LOW",
+      explanation: "Semantic domain violations such as negative ages, prices, or probabilities exceeding physical bounds."
+    },
+    {
+      name: "DISTRIBUTION_SHIFT",
+      condition: "KS distance ≥ 0.25, mean shift ≥ 30%, or TVD ≥ 0.25",
+      severity: "HIGH (KS ≥ 0.40) | MEDIUM (KS ≥ 0.25)",
+      explanation: "Statistical drift between baseline/transformed data or sequential temporal ordering drift."
+    },
+    {
+      name: "CLASS_IMBALANCE",
+      condition: "Majority-to-minority class ratio ≥ 4.0:1 (minority ≤ 20%)",
+      severity: "HIGH (ratio ≥ 10:1) | MEDIUM (ratio ≥ 4:1)",
+      explanation: "Severe target category skew that causes classification models to collapse onto majority classes."
+    },
+    {
+      name: "TARGET_LEAKAGE",
+      condition: "Feature correlation |r| ≥ 0.90 with supervised target",
+      severity: "CRITICAL (|r| ≥ 0.98) | HIGH (|r| ≥ 0.90)",
+      explanation: "Dangerous proxies or future-leaked data that artificially inflate model performance before real-world failure."
+    },
+    {
+      name: "DATE_PARSE_ERROR",
+      condition: "Conflicting date formats (YYYY-MM-DD vs MM/DD/YYYY) or unparseable calendar dates",
+      severity: "HIGH (≥10% corrupt) | MEDIUM",
+      explanation: "Inconsistent timestamp strings, invalid calendar days (e.g. Feb 30), or corrupt date formatting."
+    },
   ]
 
   return (

@@ -108,6 +108,7 @@ def trigger_profile(project_id: str, dataset_id: str):
             dataset_id=dataset_id,
             file_bytes=file_bytes,
             file_type=file_type,
+            target_column=dataset.get("target_column"),
         )
         profile_dict = profile.to_dict()
 

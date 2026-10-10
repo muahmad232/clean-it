@@ -86,6 +86,8 @@ def profile_dataset(
     dataset_id: str,
     file_bytes: bytes,
     file_type: str,
+    target_column: Optional[str] = None,
+    baseline_df: Optional[pl.DataFrame] = None,
 ) -> DatasetProfile:
     """
     Profile a dataset from raw bytes.
@@ -94,6 +96,8 @@ def profile_dataset(
         dataset_id: UUID string for the dataset record.
         file_bytes: Raw file content.
         file_type: 'csv' | 'json' | 'parquet'
+        target_column: Optional supervised learning target column.
+        baseline_df: Optional baseline DataFrame for distribution shift comparison.
 
     Returns:
         DatasetProfile dataclass (call .to_dict() for serialization).
@@ -101,7 +105,13 @@ def profile_dataset(
     logger.info(f"Profiling dataset {dataset_id}: type={file_type} size={len(file_bytes):,}B")
 
     df = _load_dataframe(file_bytes, file_type)
-    profile = _compute_profile(dataset_id, df, file_type)
+    profile = _compute_profile(
+        dataset_id,
+        df,
+        file_type,
+        target_column=target_column,
+        baseline_df=baseline_df,
+    )
 
     logger.info(
         f"Profile complete: {profile.shape['rows']} rows × {profile.shape['columns']} cols | "
@@ -160,7 +170,13 @@ def _load_dataframe(file_bytes: bytes, file_type: str) -> pl.DataFrame:
 
 # ── Core profiling ─────────────────────────────────────────────────
 
-def _compute_profile(dataset_id: str, df: pl.DataFrame, file_type: str) -> DatasetProfile:
+def _compute_profile(
+    dataset_id: str,
+    df: pl.DataFrame,
+    file_type: str,
+    target_column: Optional[str] = None,
+    baseline_df: Optional[pl.DataFrame] = None,
+) -> DatasetProfile:
     rows, cols = df.shape
     now = datetime.now(timezone.utc).isoformat()
 
@@ -183,7 +199,12 @@ def _compute_profile(dataset_id: str, df: pl.DataFrame, file_type: str) -> Datas
         col_profiles.append(_profile_column(df, col_name, rows))
 
     # ── Issue detection ───────────────────────────────────────────
-    issues = _detect_issues(df, dataset_id)
+    issues = _detect_issues(
+        df,
+        dataset_id,
+        target_column=target_column,
+        baseline_df=baseline_df,
+    )
 
     # ── LLM summary ──────────────────────────────────────────────
     llm_summary = _build_llm_summary(
@@ -278,8 +299,18 @@ def _profile_column(df: pl.DataFrame, col_name: str, total_rows: int) -> ColumnP
     )
 
 
-def _detect_issues(df: pl.DataFrame, dataset_id: str) -> list[dict[str, Any]]:
-    detected = detect_all_issues(df, dataset_id=dataset_id)
+def _detect_issues(
+    df: pl.DataFrame,
+    dataset_id: str,
+    target_column: Optional[str] = None,
+    baseline_df: Optional[pl.DataFrame] = None,
+) -> list[dict[str, Any]]:
+    detected = detect_all_issues(
+        df,
+        dataset_id=dataset_id,
+        target_column=target_column,
+        baseline_df=baseline_df,
+    )
     return [issue.to_dict() for issue in detected]
 
 
