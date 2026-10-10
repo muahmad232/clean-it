@@ -422,6 +422,50 @@ export async function runAgenticCleaning(projectId, datasetId, taskType = 'GENER
 }
 
 /**
+ * Phase 14: Autonomous Self-Healing Agent Loop
+ * Multi-iteration loop with in-loop regression detection, auto rollback, and re-planning.
+ */
+export async function runSelfHealingClean(projectId, datasetId, options = {}) {
+  const {
+    taskType = 'GENERAL',
+    targetColumn = null,
+    maxIterations = 5,
+    maxLlmCalls = 10,
+    maxActionsPerIteration = 10,
+    requireApproval = true,
+    compactPrompt = true,
+  } = options
+
+  const params = new URLSearchParams()
+  if (taskType) params.append('task_type', taskType)
+  if (targetColumn) params.append('target_column', targetColumn)
+  if (maxIterations) params.append('max_iterations', maxIterations)
+  if (maxLlmCalls) params.append('max_llm_calls', maxLlmCalls)
+  if (maxActionsPerIteration) params.append('max_actions_per_iteration', maxActionsPerIteration)
+  if (requireApproval !== undefined && requireApproval !== null) params.append('require_approval', requireApproval)
+  if (compactPrompt !== undefined && compactPrompt !== null) params.append('compact_prompt', compactPrompt)
+
+  const url = projectId
+    ? `${API_BASE}/api/v1/projects/${projectId}/datasets/${datasetId}/self-heal?${params.toString()}`
+    : `${API_BASE}/api/v1/datasets/${datasetId}/self-heal?${params.toString()}`
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...getAuthHeaders(),
+    },
+  })
+
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({}))
+    throw new Error(errBody.detail?.message || errBody.detail?.error || `Self-healing cleaning failed (HTTP ${res.status})`)
+  }
+
+  return await res.json()
+}
+
+/**
  * Phase 12: Human Approval System
  */
 
@@ -516,6 +560,30 @@ export function getVersionDownloadUrl(projectId, datasetId, versionNumber, forma
     return `${API_BASE}/api/v1/projects/${projectId}/datasets/${datasetId}/versions/${versionNumber}/download?format=${format}`
   }
   return `${API_BASE}/api/v1/datasets/${datasetId}/versions/${versionNumber}/download?format=${format}`
+}
+
+/**
+ * Phase 13: Re-Profiling & Before/After Comparison
+ */
+
+export async function fetchDatasetComparison(projectId, datasetId, vOld = null, vNew = null) {
+  const params = new URLSearchParams()
+  if (vOld !== null && vOld !== undefined) params.append('v_old', vOld)
+  if (vNew !== null && vNew !== undefined) params.append('v_new', vNew)
+
+  const queryStr = params.toString() ? `?${params.toString()}` : ''
+  const url = projectId
+    ? `${API_BASE}/api/v1/projects/${projectId}/datasets/${datasetId}/compare${queryStr}`
+    : `${API_BASE}/api/v1/datasets/${datasetId}/compare${queryStr}`
+
+  const res = await fetch(url, {
+    headers: getAuthHeaders(),
+  })
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({}))
+    throw new Error(errBody.detail?.message || errBody.detail?.error || `Failed to fetch comparison (HTTP ${res.status})`)
+  }
+  return await res.json()
 }
 
 

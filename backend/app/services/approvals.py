@@ -302,11 +302,41 @@ def resolve_user_approval(
             logger.warning(f"Could not snapshot version for cleaned action: {exc}", exc_info=True)
 
         dataset_status = "CLEANED"
-        if rejected_list:
-            rejected_names = ", ".join([r["action_type"].replace("_", " ") for r in rejected_list])
-            msg = f"All approvals resolved. Executed {len(actions_to_execute)} cleaning action(s). Denied action(s) ({rejected_names}) were skipped."
-        else:
-            msg = f"All approvals completed. Executed {len(actions_to_execute)} cleaning action(s) and created new version."
+        # Phase 13: Re-Profiling & Before/After Comparison & Regression Guard
+        comparison_report = None
+        try:
+            from app.services.comparison import compare_profiles, evaluate_and_auto_rollback_if_regressed
+            old_prof = dataset.get("profile_json") or {}
+            comparison = compare_profiles(
+                old_profile=old_prof,
+                new_profile=final_profile,
+                target_column=target_col,
+                dataset_id=dataset_id,
+                version_before=new_version.get("parent_version_id") if new_version else 0,
+                version_after=new_version.get("version_number") if new_version else 1,
+            )
+            if comparison.regression_detected and new_version:
+                evaluate_and_auto_rollback_if_regressed(
+                    dataset_id=dataset_id,
+                    comparison=comparison,
+                    target_version_id=new_version.get("parent_version_id"),
+                )
+                dataset_status = "ROLLED_BACK"
+                msg = f"Cleaned version created but rolled back due to regression: {'; '.join(comparison.regression_reasons)}"
+
+            comparison_report = comparison.to_dict()
+            profile_json["latest_comparison"] = comparison_report
+            update_dataset_profile(dataset_id, profile_json)
+        except Exception as exc:
+            logger.warning(f"Could not compute comparison for approved action: {exc}")
+
+        dataset_status = "CLEANED" if dataset_status != "ROLLED_BACK" else "ROLLED_BACK"
+        if dataset_status != "ROLLED_BACK":
+            if rejected_list:
+                rejected_names = ", ".join([r["action_type"].replace("_", " ") for r in rejected_list])
+                msg = f"All approvals resolved. Executed {len(actions_to_execute)} cleaning action(s). Denied action(s) ({rejected_names}) were skipped."
+            else:
+                msg = f"All approvals completed. Executed {len(actions_to_execute)} cleaning action(s) and created new version."
     else:
         # All proposed actions were rejected, and no safe actions were pending!
         dataset_status = "CLEANED"
@@ -331,6 +361,7 @@ def resolve_user_approval(
         "decision": decision_norm,
         "approval": updated_appr or approval,
         "version": new_version,
+        "comparison": comparison_report if 'comparison_report' in locals() else None,
         "dataset_status": dataset_status,
         "final_profile": final_profile,
         "message": msg,

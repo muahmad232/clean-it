@@ -63,6 +63,7 @@ class ApprovalDecisionResponse(BaseModel):
     decision: str
     approval: ActionApprovalItem
     version: Optional[Dict[str, Any]] = None
+    comparison: Optional[Dict[str, Any]] = None
     dataset_status: str
     final_profile: Optional[Dict[str, Any]] = None
     message: str

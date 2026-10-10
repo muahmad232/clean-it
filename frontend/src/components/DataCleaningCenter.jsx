@@ -24,6 +24,10 @@ import {
   Lock,
   Calendar,
   X,
+  GitCompare,
+  TrendingUp,
+  TrendingDown,
+  BarChart2,
 } from 'lucide-react'
 import {
   cleanDataset,
@@ -35,6 +39,8 @@ import {
   getVersionDownloadUrl,
   fetchDatasetApprovals,
   submitApprovalDecision,
+  fetchDatasetComparison,
+  runSelfHealingClean,
 } from '../api'
 
 export default function DataCleaningCenter({
@@ -70,8 +76,9 @@ export default function DataCleaningCenter({
   const [approvalFeedback, setApprovalFeedback] = useState({})
   const [approvalBannerMsg, setApprovalBannerMsg] = useState(null)
 
-  // AI Agent Loop Configuration & State
+  // Phase 14: Autonomous Self-Healing Agent Loop Configuration & State
   const [maxIterations, setMaxIterations] = useState(3)
+  const [selfHealingMode, setSelfHealingMode] = useState(true)
   const [agentResult, setAgentResult] = useState(null)
   const [agentLoading, setAgentLoading] = useState(false)
   const [agentError, setAgentError] = useState(null)
@@ -89,6 +96,35 @@ export default function DataCleaningCenter({
   const [diagnosticData, setDiagnosticData] = useState(null)
   const [diagnosticLoading, setDiagnosticLoading] = useState(false)
   const [diagnosticError, setDiagnosticError] = useState(null)
+
+  // Phase 13: Re-Profiling & Before/After Comparison State
+  const [comparisonReport, setComparisonReport] = useState(
+    profile?.latest_comparison || dataset?.profile_json?.latest_comparison || null
+  )
+  const [comparisonLoading, setComparisonLoading] = useState(false)
+  const [comparisonError, setComparisonError] = useState(null)
+  const [compareVersionA, setCompareVersionA] = useState('')
+  const [compareVersionB, setCompareVersionB] = useState('')
+
+  const loadComparison = async (vOld = null, vNew = null) => {
+    if (!dataset?.id) return
+    setComparisonLoading(true)
+    setComparisonError(null)
+    try {
+      const data = await fetchDatasetComparison(
+        projectId || dataset.project_id,
+        dataset.id,
+        vOld !== '' ? vOld : null,
+        vNew !== '' ? vNew : null
+      )
+      setComparisonReport(data)
+    } catch (err) {
+      console.warn('Could not fetch dataset comparison:', err)
+      setComparisonError(err.message || 'Could not load before/after comparison.')
+    } finally {
+      setComparisonLoading(false)
+    }
+  }
 
   const columns = profile?.columns?.map((c) => c.name) || []
 
@@ -128,7 +164,7 @@ export default function DataCleaningCenter({
     loadApprovals()
   }, [dataset?.id])
 
-  // ── Handler 1: Autonomous Multi-Step AI Agent Cleaning Loop ───────
+  // ── Handler 1: Autonomous Multi-Step AI Agent Cleaning Loop (Phase 14 Self-Healing) ───────
   const handleRunAgentLoop = async () => {
     if (!dataset?.id) return
     setAgentLoading(true)
@@ -136,20 +172,40 @@ export default function DataCleaningCenter({
     setApprovalBannerMsg(null)
 
     try {
-      const res = await runAgenticCleaning(
-        projectId || dataset.project_id,
-        dataset.id,
-        selectedTask,
-        targetColumn.trim() || null,
-        maxIterations,
-        requireApproval
-      )
+      let res
+      if (selfHealingMode) {
+        res = await runSelfHealingClean(
+          projectId || dataset.project_id,
+          dataset.id,
+          {
+            taskType: selectedTask,
+            targetColumn: targetColumn.trim() || null,
+            maxIterations,
+            requireApproval,
+            maxLlmCalls: 10,
+            maxActionsPerIteration: 10,
+            compactPrompt: true,
+          }
+        )
+      } else {
+        res = await runAgenticCleaning(
+          projectId || dataset.project_id,
+          dataset.id,
+          selectedTask,
+          targetColumn.trim() || null,
+          maxIterations,
+          requireApproval
+        )
+      }
       setAgentResult(res)
       if (res?.report?.steps && res.report.steps.length > 0) {
         setExpandedStep(res.report.steps.length)
       }
       if (res?.version) {
         setCurrentVersion(res.version)
+      }
+      if (res?.comparison) {
+        setComparisonReport(res.comparison)
       }
       if (res?.pending_approvals && res.pending_approvals.length > 0) {
         setPendingApprovals(res.pending_approvals)
@@ -190,6 +246,9 @@ export default function DataCleaningCenter({
       setPendingApprovals(remainingApprovals)
       if (res.version) {
         setCurrentVersion(res.version)
+      }
+      if (res.comparison) {
+        setComparisonReport(res.comparison)
       }
 
       // Transition agentResult state out of paused status
@@ -257,6 +316,9 @@ export default function DataCleaningCenter({
       if (res.version) {
         setCurrentVersion(res.version)
       }
+      if (res.comparison) {
+        setComparisonReport(res.comparison)
+      }
 
       setApprovalBannerMsg({
         type: res.version ? 'success' : 'neutral',
@@ -315,7 +377,6 @@ export default function DataCleaningCenter({
     if (!dataset?.id) return
     setInstantLoading(true)
     setInstantError(null)
-
     try {
       const res = await cleanDataset(
         projectId || dataset.project_id,
@@ -325,6 +386,9 @@ export default function DataCleaningCenter({
       )
       setInstantReport(res.report)
       setLastInstantCleanedAt(new Date().toLocaleTimeString())
+      if (res.comparison) {
+        setComparisonReport(res.comparison)
+      }
       if (onDatasetCleaned) {
         onDatasetCleaned(res)
       }
@@ -519,6 +583,28 @@ export default function DataCleaningCenter({
           >
             <History size={12} /> History & Rollback ({versionsList.length || 1})
           </button>
+          <button
+            onClick={() => {
+              setActiveMode('comparison')
+              if (!comparisonReport) {
+                loadComparison()
+              }
+            }}
+            className={`btn btn-xs ${activeMode === 'comparison' ? 'btn-primary' : 'btn-ghost'}`}
+            style={{ fontSize: '0.75rem', padding: '0.25rem 0.65rem' }}
+          >
+            <GitCompare size={12} /> Before/After Comparison
+            {comparisonReport && (
+              <span style={{
+                marginLeft: '0.35rem',
+                color: comparisonReport.quality_score_delta >= 0 ? 'var(--emerald-primary)' : '#f43f5e',
+                fontWeight: 700,
+                fontSize: '0.7rem',
+              }}>
+                {comparisonReport.quality_score_delta >= 0 ? `+${comparisonReport.quality_score_delta}` : comparisonReport.quality_score_delta}
+              </span>
+            )}
+          </button>
         </div>
       </div>
 
@@ -685,6 +771,47 @@ export default function DataCleaningCenter({
           </div>
         )}
 
+        {/* Phase 14: Autonomous Self-Healing Guardrail Toggle (Only in agent_loop mode) */}
+        {activeMode === 'agent_loop' && (
+          <div>
+            <label style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '0.3rem', fontWeight: 500 }}>
+              Self-Healing Loop (Phase 14)
+            </label>
+            <button
+              type="button"
+              onClick={() => setSelfHealingMode(!selfHealingMode)}
+              disabled={isAnyCleaningActive}
+              className="btn btn-ghost"
+              style={{
+                width: '100%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                background: selfHealingMode ? 'rgba(16, 185, 129, 0.08)' : 'var(--bg-surface)',
+                border: selfHealingMode ? '1px solid rgba(16, 185, 129, 0.45)' : '1px solid var(--border-medium)',
+                borderRadius: 'var(--radius-sm)',
+                padding: '0.35rem 0.6rem',
+                fontSize: '0.78rem',
+                color: selfHealingMode ? 'var(--emerald-primary)' : 'var(--text-muted)',
+                cursor: 'pointer',
+                height: '34px',
+              }}
+              title="Autonomous multi-iteration self-healing loop: auto-rollbacks candidate dataset on regression and re-plans with LLM"
+            >
+              <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                <RotateCcw size={13} color={selfHealingMode ? 'var(--emerald-primary)' : 'var(--text-muted)'} />
+                {selfHealingMode ? 'Auto Rollback & Re-plan' : 'Standard Loop'}
+              </span>
+              <span
+                className={`badge ${selfHealingMode ? 'badge-green' : 'badge-muted'}`}
+                style={{ fontSize: '0.65rem', padding: '0.1rem 0.35rem' }}
+              >
+                {selfHealingMode ? 'ACTIVE' : 'OFF'}
+              </span>
+            </button>
+          </div>
+        )}
+
         {/* Action Button */}
         <div>
           {activeMode === 'agent_loop' && (
@@ -705,12 +832,12 @@ export default function DataCleaningCenter({
               {agentLoading ? (
                 <>
                   <Loader2 size={14} className="spin" />
-                  Agent Iterating...
+                  {selfHealingMode ? 'Self-Healing Loop...' : 'Agent Iterating...'}
                 </>
               ) : (
                 <>
                   <Sparkles size={14} />
-                  Run Autonomous Loop
+                  {selfHealingMode ? 'Run Self-Healing Loop' : 'Run Autonomous Loop'}
                 </>
               )}
             </button>
@@ -791,7 +918,9 @@ export default function DataCleaningCenter({
           <ShieldCheck size={13} color="var(--emerald-primary)" />
           <span>
             {activeMode === 'agent_loop'
-              ? 'Agent Loop: Qwen 3.8 27B plans tool actions &rarr; Polars executes deterministically &rarr; Re-profiles.'
+              ? selfHealingMode
+                ? 'Phase 14 Self-Healing Loop: Multi-iteration autonomous cycle with in-loop regression detection, auto rollback, and LLM re-planning (max 5 iters, 10 LLM calls).'
+                : 'Agent Loop: Qwen 3.8 27B plans tool actions &rarr; Polars executes deterministically &rarr; Re-profiles.'
               : activeMode === 'instant_deterministic'
               ? 'Instant Mode: Pure deterministic Polars transformations (0 tokens consumed, runs in 5ms).'
               : 'Diagnostic Mode: Compact fingerprint analyzed for defect impact (read-only, no modifications).'}
@@ -1176,6 +1305,35 @@ export default function DataCleaningCenter({
               </div>
             </div>
 
+            {/* Phase 14: In-Loop Self-Healing Rollback Banner */}
+            {agentResult.report?.total_rollbacks > 0 && (
+              <div style={{
+                background: 'rgba(239, 68, 68, 0.08)',
+                border: '1px solid rgba(239, 68, 68, 0.35)',
+                borderRadius: 'var(--radius-sm)',
+                padding: '0.65rem 0.85rem',
+                marginBottom: '0.75rem',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: '0.5rem',
+                fontSize: '0.78rem',
+                color: '#ef4444',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                  <RotateCcw size={14} />
+                  <span>
+                    <strong>Self-Healing Loop Active:</strong> {agentResult.report.total_rollbacks} regression event(s) detected and automatically reverted in-loop.
+                    Agent adapted its strategy and converged successfully.
+                  </span>
+                </div>
+                <span className="badge badge-rose" style={{ fontSize: '0.68rem', fontWeight: 600 }}>
+                  {agentResult.report.total_rollbacks} In-Loop Rollback(s) Recovered
+                </span>
+              </div>
+            )}
+
             {/* Before vs After Metric Grid */}
             <div style={{
               display: 'grid',
@@ -1226,6 +1384,15 @@ export default function DataCleaningCenter({
                   </span>
                 </div>
               </div>
+
+              {agentResult.report?.total_llm_calls !== undefined && (
+                <div style={{ background: 'var(--bg-surface)', padding: '0.6rem 0.75rem', borderRadius: 'var(--radius-sm)' }}>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Telemetry</div>
+                  <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                    {agentResult.report?.total_iterations || 1} iters &bull; {agentResult.report?.total_llm_calls || 1}/10 LLM
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )
@@ -1240,12 +1407,13 @@ export default function DataCleaningCenter({
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
               {agentResult.report?.steps?.map((step) => {
                 const isExpanded = expandedStep === step.iteration
+                const isStepRolledBack = Boolean(step.rolled_back || step.status === 'ROLLED_BACK')
                 return (
                   <div
                     key={step.iteration}
                     style={{
                       background: 'var(--bg-main)',
-                      border: '1px solid var(--border-subtle)',
+                      border: isStepRolledBack ? '1px solid rgba(239, 68, 68, 0.4)' : '1px solid var(--border-subtle)',
                       borderRadius: 'var(--radius-sm)',
                       overflow: 'hidden',
                     }}
@@ -1259,7 +1427,7 @@ export default function DataCleaningCenter({
                         padding: '0.75rem 1rem',
                         cursor: 'pointer',
                         userSelect: 'none',
-                        background: isExpanded ? 'var(--bg-subtle)' : 'transparent',
+                        background: isExpanded ? 'var(--bg-subtle)' : isStepRolledBack ? 'rgba(239, 68, 68, 0.03)' : 'transparent',
                       }}
                     >
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
@@ -1267,20 +1435,21 @@ export default function DataCleaningCenter({
                           width: '24px',
                           height: '24px',
                           borderRadius: '50%',
-                          background: 'var(--bg-surface)',
-                          border: '1px solid var(--border-medium)',
+                          background: isStepRolledBack ? 'rgba(239, 68, 68, 0.15)' : 'var(--bg-surface)',
+                          border: isStepRolledBack ? '1px solid rgba(239, 68, 68, 0.5)' : '1px solid var(--border-medium)',
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
                           fontSize: '0.75rem',
                           fontWeight: 600,
                           fontFamily: 'var(--font-mono)',
+                          color: isStepRolledBack ? '#ef4444' : 'var(--text-primary)',
                         }}>
                           {step.iteration}
                         </div>
                         <div>
                           <span style={{ fontWeight: 600, fontSize: '0.85rem', color: 'var(--text-primary)' }}>
-                            Iteration {step.iteration}: {step.is_dataset_clean ? 'Verification & Clean State' : `Executed ${step.selected_actions?.length || 0} Action(s)`}
+                            Iteration {step.iteration}: {isStepRolledBack ? 'Rolled Back & Re-Planned' : step.is_dataset_clean ? 'Verification & Clean State' : `Executed ${step.selected_actions?.length || 0} Action(s)`}
                           </span>
                           <span style={{ marginLeft: '0.6rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                             ({step.pre_shape?.rows}x{step.pre_shape?.columns} &bull; Grade {step.health_grade})
@@ -1289,9 +1458,17 @@ export default function DataCleaningCenter({
                       </div>
 
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                        {step.is_dataset_clean ? (
-                          <span className="badge badge-green" style={{ fontSize: '0.7rem' }}>
-                            Clean Verified
+                        {isStepRolledBack ? (
+                          <span className="badge badge-rose" style={{ fontSize: '0.7rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                            <RotateCcw size={10} /> Rolled Back
+                          </span>
+                        ) : step.is_dataset_clean || step.status === 'CONVERGED_CLEAN' ? (
+                          <span className="badge badge-green" style={{ fontSize: '0.7rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                            <Check size={10} /> Clean Verified
+                          </span>
+                        ) : step.status === 'WAITING_APPROVAL' ? (
+                          <span className="badge badge-amber" style={{ fontSize: '0.7rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                            <ShieldAlert size={10} /> Paused
                           </span>
                         ) : (
                           <span className="badge badge-muted" style={{ fontSize: '0.7rem' }}>
@@ -1304,6 +1481,42 @@ export default function DataCleaningCenter({
 
                     {isExpanded && (
                       <div style={{ padding: '0.9rem 1rem', borderTop: '1px solid var(--border-subtle)', fontSize: '0.8rem' }}>
+                        {/* Phase 14: In-Loop Rollback Alert Box */}
+                        {isStepRolledBack && (
+                          <div style={{
+                            background: 'rgba(239, 68, 68, 0.08)',
+                            border: '1px solid rgba(239, 68, 68, 0.35)',
+                            borderRadius: 'var(--radius-sm)',
+                            padding: '0.75rem 0.9rem',
+                            marginBottom: '0.85rem',
+                          }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#ef4444', fontWeight: 600, fontSize: '0.78rem', marginBottom: '0.35rem' }}>
+                              <RotateCcw size={13} />
+                              <span>Autonomous In-Loop Rollback Triggered</span>
+                            </div>
+                            <div style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', marginBottom: '0.4rem', lineHeight: 1.4 }}>
+                              Quality score dropped from{' '}
+                              <strong>{step.regression_event?.quality_score_before?.toFixed(1) ?? step.pre_quality_score?.toFixed(1) ?? 'N/A'}</strong> to{' '}
+                              <strong style={{ color: '#ef4444' }}>{step.regression_event?.quality_score_regressed?.toFixed(1) ?? step.post_quality_score?.toFixed(1) ?? 'N/A'}</strong>
+                              {step.regression_event?.score_drop ? ` (-${step.regression_event.score_drop.toFixed(1)} pts)` : ''}.
+                              Candidate dataset was rolled back in-loop.
+                            </div>
+                            {step.regression_event?.reasons && step.regression_event.reasons.length > 0 && (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem', marginTop: '0.35rem', marginBottom: '0.4rem' }}>
+                                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Detected Regressions:</div>
+                                {step.regression_event.reasons.map((r, rIdx) => (
+                                  <div key={rIdx} style={{ fontSize: '0.74rem', color: '#ef4444', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                                    <AlertTriangle size={11} color="#ef4444" />
+                                    <span>{r}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontStyle: 'italic', background: 'rgba(0,0,0,0.2)', padding: '0.35rem 0.5rem', borderRadius: 'var(--radius-sm)' }}>
+                              Injected Prompt to Agent: &quot;Rolled back: quality dropped. Re-plan with alternative strategies.&quot;
+                            </div>
+                          </div>
+                        )}
                         <div style={{ marginBottom: '0.75rem' }}>
                           <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '0.2rem' }}>
                             LLM Agent Reasoning
@@ -1893,6 +2106,353 @@ export default function DataCleaningCenter({
                   </div>
                 )
               })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ══════════════════════════════════════════════════════════════ */}
+      {/* MODE 5: Before / After Re-Profiling & Comparison (Phase 13)    */}
+      {/* ══════════════════════════════════════════════════════════════ */}
+      {activeMode === 'comparison' && (
+        <div style={{
+          background: 'var(--bg-surface)',
+          border: '1px solid var(--border-medium)',
+          borderRadius: 'var(--radius-sm)',
+          padding: '1.25rem',
+          marginBottom: '1rem',
+        }}>
+          {/* Header & Version Selectors */}
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '0.75rem',
+            marginBottom: '1rem',
+            paddingBottom: '0.85rem',
+            borderBottom: '1px solid var(--border-subtle)',
+          }}>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.2rem' }}>
+                <span style={{ fontWeight: 600, fontSize: '0.92rem', color: 'var(--text-primary)' }}>
+                  Before / After Re-Profiling & Regression Comparison
+                </span>
+                <span className="badge badge-muted" style={{ fontSize: '0.7rem' }}>
+                  Phase 13
+                </span>
+              </div>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '0.76rem', margin: 0 }}>
+                Deterministic quality score delta, target class distribution shift detection, and per-metric verification.
+              </p>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                <label style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>From:</label>
+                <select
+                  value={compareVersionA}
+                  onChange={(e) => setCompareVersionA(e.target.value)}
+                  className="select-input"
+                  style={{
+                    fontSize: '0.75rem',
+                    padding: '0.2rem 0.5rem',
+                    background: 'var(--bg-main)',
+                    color: 'var(--text-primary)',
+                    border: '1px solid var(--border-medium)',
+                    borderRadius: 'var(--radius-sm)',
+                  }}
+                >
+                  <option value="">Default (Parent/v0)</option>
+                  {versionsList.map((v) => (
+                    <option key={v.id} value={v.version_number}>v{v.version_number} ({v.created_by_action?.slice(0, 20)}...)</option>
+                  ))}
+                </select>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                <label style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>To:</label>
+                <select
+                  value={compareVersionB}
+                  onChange={(e) => setCompareVersionB(e.target.value)}
+                  className="select-input"
+                  style={{
+                    fontSize: '0.75rem',
+                    padding: '0.2rem 0.5rem',
+                    background: 'var(--bg-main)',
+                    color: 'var(--text-primary)',
+                    border: '1px solid var(--border-medium)',
+                    borderRadius: 'var(--radius-sm)',
+                  }}
+                >
+                  <option value="">Default (Current/vN)</option>
+                  {versionsList.map((v) => (
+                    <option key={v.id} value={v.version_number}>v{v.version_number} ({v.created_by_action?.slice(0, 20)}...)</option>
+                  ))}
+                </select>
+              </div>
+
+              <button
+                onClick={() => loadComparison(compareVersionA || null, compareVersionB || null)}
+                disabled={comparisonLoading}
+                className="btn btn-xs btn-primary"
+                style={{ fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}
+              >
+                {comparisonLoading ? <Loader2 size={12} className="spin" /> : <RefreshCw size={12} />}
+                Re-Evaluate
+              </button>
+            </div>
+          </div>
+
+          {/* Loading / Error States */}
+          {comparisonLoading && (
+            <div style={{ textAlign: 'center', padding: '2rem 1rem', color: 'var(--text-muted)' }}>
+              <Loader2 size={24} className="spin" style={{ margin: '0 auto 0.5rem' }} />
+              <p style={{ fontSize: '0.8rem' }}>Re-profiling dataset states and computing delta comparison...</p>
+            </div>
+          )}
+
+          {comparisonError && !comparisonLoading && (
+            <div style={{
+              background: 'rgba(239, 68, 68, 0.1)',
+              border: '1px solid #ef4444',
+              borderRadius: 'var(--radius-sm)',
+              padding: '0.65rem 0.85rem',
+              color: '#ef4444',
+              fontSize: '0.78rem',
+              marginBottom: '1rem',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+            }}>
+              <AlertTriangle size={14} />
+              {comparisonError}
+            </div>
+          )}
+
+          {/* Comparison Report Content */}
+          {comparisonReport && !comparisonLoading && (
+            <div>
+              {/* Regression / Auto-Rollback Status Banner */}
+              {comparisonReport.regression_detected ? (
+                <div style={{
+                  background: 'rgba(244, 63, 94, 0.1)',
+                  border: '1px solid #f43f5e',
+                  borderRadius: 'var(--radius-sm)',
+                  padding: '0.75rem 1rem',
+                  marginBottom: '1rem',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.3rem' }}>
+                    <AlertTriangle size={16} color="#f43f5e" />
+                    <span style={{ fontWeight: 600, fontSize: '0.85rem', color: '#f43f5e' }}>
+                      Quality Regression Detected
+                    </span>
+                    {comparisonReport.auto_rolled_back && (
+                      <span className="badge badge-amber" style={{ fontSize: '0.68rem' }}>
+                        Auto-Rollback Triggered
+                      </span>
+                    )}
+                  </div>
+                  <ul style={{ margin: '0 0 0.4rem 1.25rem', padding: 0, fontSize: '0.78rem', color: 'var(--text-primary)' }}>
+                    {comparisonReport.regression_reasons?.map((reason, idx) => (
+                      <li key={idx}>{reason}</li>
+                    ))}
+                  </ul>
+                  {comparisonReport.auto_rolled_back && (
+                    <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                      🛡️ System safety layer automatically restored the dataset to the parent clean snapshot.
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <div style={{
+                  background: 'rgba(16, 185, 129, 0.08)',
+                  border: '1px solid var(--emerald-primary)',
+                  borderRadius: 'var(--radius-sm)',
+                  padding: '0.65rem 0.85rem',
+                  marginBottom: '1rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                }}>
+                  <CheckCircle2 size={16} color="var(--emerald-primary)" />
+                  <span style={{ fontSize: '0.8rem', color: 'var(--text-primary)' }}>
+                    {comparisonReport.summary || 'Quality improved without regressions. Transformation safety verified.'}
+                  </span>
+                </div>
+              )}
+
+              {/* Quality Score Highlight Card */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                gap: '0.75rem',
+                marginBottom: '1rem',
+              }}>
+                <div style={{
+                  background: 'var(--bg-main)',
+                  border: '1px solid var(--border-medium)',
+                  borderRadius: 'var(--radius-sm)',
+                  padding: '0.85rem',
+                }}>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '0.2rem' }}>
+                    Quality Score Delta
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.6rem' }}>
+                    <span style={{ fontSize: '1.4rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                      {comparisonReport.quality_score_after?.overall_score ?? 0}
+                    </span>
+                    <span style={{
+                      fontSize: '0.88rem',
+                      fontWeight: 600,
+                      color: comparisonReport.quality_score_delta >= 0 ? 'var(--emerald-primary)' : '#f43f5e',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.2rem',
+                    }}>
+                      {comparisonReport.quality_score_delta >= 0 ? <TrendingUp size={13} /> : <TrendingDown size={13} />}
+                      {comparisonReport.quality_score_delta >= 0 ? `+${comparisonReport.quality_score_delta}` : comparisonReport.quality_score_delta} pts
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
+                    Previous: {comparisonReport.quality_score_before?.overall_score ?? 0} / 100
+                  </div>
+                </div>
+
+                <div style={{
+                  background: 'var(--bg-main)',
+                  border: '1px solid var(--border-medium)',
+                  borderRadius: 'var(--radius-sm)',
+                  padding: '0.85rem',
+                }}>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '0.4rem' }}>
+                    Formula Breakdown (Post-Clean)
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.35rem', fontSize: '0.74rem' }}>
+                    <div>Completeness: <strong>{comparisonReport.quality_score_after?.completeness_score}%</strong></div>
+                    <div>Type Safety: <strong>{comparisonReport.quality_score_after?.type_consistency_score}%</strong></div>
+                    <div>Uniqueness: <strong>{comparisonReport.quality_score_after?.uniqueness_score}%</strong></div>
+                    <div>Validity: <strong>{comparisonReport.quality_score_after?.validity_score}%</strong></div>
+                  </div>
+                </div>
+
+                {comparisonReport.target_distribution && (
+                  <div style={{
+                    background: 'var(--bg-main)',
+                    border: `1px solid ${comparisonReport.target_distribution.shift_detected ? '#f43f5e' : 'var(--border-medium)'}`,
+                    borderRadius: 'var(--radius-sm)',
+                    padding: '0.85rem',
+                  }}>
+                    <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '0.2rem' }}>
+                      Target Distribution ({comparisonReport.target_distribution.target_column || 'Target'})
+                    </div>
+                    <div style={{ fontSize: '0.82rem', fontWeight: 600, color: comparisonReport.target_distribution.shift_detected ? '#f43f5e' : 'var(--emerald-primary)' }}>
+                      {comparisonReport.target_distribution.shift_detected ? 'Shift Exceeded >20%' : 'Stable (<=20% change)'}
+                    </div>
+                    <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
+                      Max Shift: {comparisonReport.target_distribution.max_relative_shift_pct}%
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Per-Metric Comparison Table */}
+              <div style={{
+                background: 'var(--bg-main)',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: 'var(--radius-sm)',
+                overflow: 'hidden',
+                marginBottom: '1rem',
+              }}>
+                <div style={{ padding: '0.6rem 0.85rem', borderBottom: '1px solid var(--border-subtle)', fontSize: '0.78rem', fontWeight: 600 }}>
+                  Per-Metric Comparison Table
+                </div>
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.76rem' }}>
+                    <thead>
+                      <tr style={{ background: 'var(--bg-subtle)', textAlign: 'left', borderBottom: '1px solid var(--border-subtle)' }}>
+                        <th style={{ padding: '0.5rem 0.75rem' }}>Metric</th>
+                        <th style={{ padding: '0.5rem 0.75rem' }}>Category</th>
+                        <th style={{ padding: '0.5rem 0.75rem' }}>Before</th>
+                        <th style={{ padding: '0.5rem 0.75rem' }}>After</th>
+                        <th style={{ padding: '0.5rem 0.75rem' }}>Delta</th>
+                        <th style={{ padding: '0.5rem 0.75rem' }}>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {comparisonReport.metrics_table?.map((row, idx) => (
+                        <tr key={idx} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                          <td style={{ padding: '0.45rem 0.75rem', fontWeight: 500 }}>{row.metric_name}</td>
+                          <td style={{ padding: '0.45rem 0.75rem', color: 'var(--text-muted)', textTransform: 'capitalize' }}>{row.category}</td>
+                          <td style={{ padding: '0.45rem 0.75rem' }}>{String(row.before)}</td>
+                          <td style={{ padding: '0.45rem 0.75rem', fontWeight: 600 }}>{String(row.after)}</td>
+                          <td style={{
+                            padding: '0.45rem 0.75rem',
+                            fontWeight: 600,
+                            color: row.status === 'improved' ? 'var(--emerald-primary)' : row.status === 'degraded' ? '#f43f5e' : 'var(--text-secondary)',
+                          }}>
+                            {String(row.delta)}
+                          </td>
+                          <td style={{ padding: '0.45rem 0.75rem' }}>
+                            <span className={`badge ${row.status === 'improved' ? 'badge-green' : row.status === 'degraded' ? 'badge-amber' : 'badge-muted'}`} style={{ fontSize: '0.65rem' }}>
+                              {row.status}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Resolved vs Introduced Issues */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '0.75rem' }}>
+                <div style={{
+                  background: 'var(--bg-main)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: 'var(--radius-sm)',
+                  padding: '0.75rem',
+                }}>
+                  <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--emerald-primary)', marginBottom: '0.4rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                    <CheckCircle2 size={13} />
+                    Resolved Issues ({comparisonReport.issues_resolved?.length || 0})
+                  </div>
+                  {comparisonReport.issues_resolved?.length === 0 ? (
+                    <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', margin: 0 }}>No issues were resolved in this step.</p>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+                      {comparisonReport.issues_resolved?.map((iss, i) => (
+                        <div key={i} style={{ fontSize: '0.72rem', color: 'var(--text-primary)' }}>
+                          • <strong>{iss.column_name || 'dataset'}</strong>: {iss.issue_type} — {iss.description}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div style={{
+                  background: 'var(--bg-main)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: 'var(--radius-sm)',
+                  padding: '0.75rem',
+                }}>
+                  <div style={{ fontSize: '0.75rem', fontWeight: 600, color: comparisonReport.new_issues_introduced?.length > 0 ? '#f43f5e' : 'var(--text-muted)', marginBottom: '0.4rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                    <AlertTriangle size={13} />
+                    Newly Introduced Issues ({comparisonReport.new_issues_introduced?.length || 0})
+                  </div>
+                  {comparisonReport.new_issues_introduced?.length === 0 ? (
+                    <p style={{ fontSize: '0.72rem', color: 'var(--emerald-primary)', margin: 0 }}>Clean transformation — zero new defects introduced ✅</p>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+                      {comparisonReport.new_issues_introduced?.map((iss, i) => (
+                        <div key={i} style={{ fontSize: '0.72rem', color: '#f43f5e' }}>
+                          • <strong>{iss.column_name || 'dataset'}</strong>: {iss.issue_type} — {iss.description}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           )}
         </div>

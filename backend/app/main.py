@@ -166,6 +166,10 @@ def _register_routes(app: FastAPI) -> None:
     from app.routers.approvals import router as approvals_router
     app.include_router(approvals_router)
 
+    # Phase 13: Re-Profiling & Before/After Comparison
+    from app.routers.comparison import router as comparison_router
+    app.include_router(comparison_router)
+
     @app.get(
         "/health",
         tags=["System"],

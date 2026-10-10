@@ -144,6 +144,33 @@ def clean_project_dataset(
     except Exception as exc:
         logger.warning(f"Could not snapshot version for cleaned dataset {dataset_id}: {exc}")
 
+    # 4c. Phase 13: Re-Profiling & Before/After Comparison & Regression Guard
+    comparison_report = None
+    try:
+        from app.services.comparison import compare_profiles, evaluate_and_auto_rollback_if_regressed
+        from app.services.profiler import profile_dataset
+        new_prof = profile_dataset(dataset_id=dataset_id, file_bytes=cleaned_bytes, file_type="csv").to_dict()
+        old_prof = dataset.get("profile_json") or {}
+        comparison = compare_profiles(
+            old_profile=old_prof,
+            new_profile=new_prof,
+            target_column=effective_target,
+            dataset_id=dataset_id,
+            version_before=new_version.get("parent_version_id") if new_version else 0,
+            version_after=new_version.get("version_number") if new_version else 1,
+        )
+        if comparison.regression_detected and new_version:
+            evaluate_and_auto_rollback_if_regressed(
+                dataset_id=dataset_id,
+                comparison=comparison,
+                target_version_id=new_version.get("parent_version_id"),
+            )
+        comparison_report = comparison.to_dict()
+        profile_json["latest_comparison"] = comparison_report
+        update_dataset_profile(dataset_id, profile_json)
+    except Exception as exc:
+        logger.warning(f"Could not compute comparison for cleaned dataset: {exc}")
+
     return {
         "dataset_id": dataset_id,
         "status": "CLEANED",
@@ -151,6 +178,7 @@ def clean_project_dataset(
         "target_column": effective_target,
         "report": report,
         "version": new_version,
+        "comparison": comparison_report,
         "download_url": f"/api/v1/projects/{project_id}/datasets/{dataset_id}/download",
     }
 
@@ -192,6 +220,7 @@ def clean_project_dataset_agentic(
     target_column: Optional[str] = Query(default=None, description="Target column to protect"),
     max_iterations: int = Query(default=3, ge=1, le=5, description="Maximum agentic iteration cycles"),
     require_approval: bool = Query(default=True, description="Pause and require human sign-off for HIGH-risk actions"),
+    self_healing: bool = Query(default=False, description="Enable Phase 14 self-healing autonomous loop with in-loop regression rollback"),
 ):
     """
     Execute an autonomous multi-step cleaning loop:
@@ -201,6 +230,15 @@ def clean_project_dataset_agentic(
     4. Dataset is re-profiled and re-analyzed.
     5. Repeats until clean, waiting for approval, or max_iterations reached.
     """
+    if self_healing is True:
+        return clean_project_dataset_self_heal(
+            project_id=project_id,
+            dataset_id=dataset_id,
+            task_type=task_type,
+            target_column=target_column,
+            max_iterations=max_iterations,
+            require_approval=require_approval,
+        )
     project = get_project(project_id)
     if not project:
         raise HTTPException(
@@ -360,6 +398,33 @@ def clean_project_dataset_agentic(
     except Exception as exc:
         logger.warning(f"Could not snapshot version for agent-cleaned dataset {dataset_id}: {exc}", exc_info=True)
 
+    # 4c. Phase 13: Re-Profiling & Before/After Comparison & Regression Guard
+    comparison_report = None
+    try:
+        from app.services.comparison import compare_profiles, evaluate_and_auto_rollback_if_regressed
+        old_prof = dataset.get("profile_json") or {}
+        comparison = compare_profiles(
+            old_profile=old_prof,
+            new_profile=final_profile,
+            target_column=effective_target,
+            dataset_id=dataset_id,
+            version_before=new_version.get("parent_version_id") if new_version else 0,
+            version_after=new_version.get("version_number") if new_version else 1,
+        )
+        if comparison.regression_detected and new_version:
+            evaluate_and_auto_rollback_if_regressed(
+                dataset_id=dataset_id,
+                comparison=comparison,
+                target_version_id=new_version.get("parent_version_id"),
+            )
+            effective_status = "ROLLED_BACK"
+
+        comparison_report = comparison.to_dict()
+        profile_json["latest_comparison"] = comparison_report
+        update_dataset_profile(dataset_id, profile_json)
+    except Exception as exc:
+        logger.warning(f"Could not compute comparison for agent-cleaned dataset: {exc}")
+
     return {
         "dataset_id": dataset_id,
         "status": effective_status,
@@ -368,6 +433,7 @@ def clean_project_dataset_agentic(
         "report": run_result,
         "final_profile": final_profile,
         "version": new_version,
+        "comparison": comparison_report,
         "pending_approvals": pending_apprs,
         "download_url": f"/api/v1/projects/{project_id}/datasets/{dataset_id}/download",
     }
@@ -384,6 +450,7 @@ def clean_direct_dataset_agentic(
     target_column: Optional[str] = Query(default=None),
     max_iterations: int = Query(default=3, ge=1, le=5),
     require_approval: bool = Query(default=True),
+    self_healing: bool = Query(default=False),
 ):
     """Direct route for agentic cleaning without project_id in URL."""
     dataset = get_dataset(dataset_id)
@@ -393,6 +460,224 @@ def clean_direct_dataset_agentic(
             detail={"error": "dataset_not_found", "message": f"Dataset '{dataset_id}' not found."},
         )
     return clean_project_dataset_agentic(
+        project_id=dataset["project_id"],
+        dataset_id=dataset_id,
+        task_type=task_type,
+        target_column=target_column,
+        max_iterations=max_iterations,
+        require_approval=require_approval,
+        self_healing=self_healing,
+    )
+
+
+@router.post(
+    "/api/v1/projects/{project_id}/datasets/{dataset_id}/self-heal",
+    summary="Phase 14: Autonomous Self-Healing Agent Loop with In-Loop Rollback & Re-Planning",
+    status_code=status.HTTP_200_OK,
+)
+def clean_project_dataset_self_heal(
+    project_id: str,
+    dataset_id: str,
+    task_type: Optional[str] = Query(default=None, description="Task type override (CLASSIFICATION, REGRESSION, etc.)"),
+    target_column: Optional[str] = Query(default=None, description="Target column to protect"),
+    max_iterations: int = Query(default=5, ge=1, le=5, description="Maximum iterations (hard limit = 5)"),
+    require_approval: bool = Query(default=True, description="Pause and require human sign-off for HIGH-risk actions"),
+):
+    """
+    Execute Phase 14 Autonomous Self-Healing Agent Loop:
+    1. Multi-iteration loop (up to max_iterations <= 5, max 10 LLM calls).
+    2. At each iteration, Polars profiles and LLM plans transformations.
+    3. Executes deterministic transformations.
+    4. Re-profiles and runs multi-metric comparison.
+    5. If quality regresses (> 5 pts) or target distribution shifts (> 20%), triggers in-loop rollback,
+       injects regression feedback into the LLM, and re-plans autonomously.
+    6. Snapshots a new immutable version upon convergence.
+    """
+    project = get_project(project_id)
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "project_not_found", "message": f"Project '{project_id}' not found."},
+        )
+
+    dataset = get_dataset(dataset_id)
+    if not dataset or dataset.get("project_id") != project_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "dataset_not_found", "message": f"Dataset '{dataset_id}' not found."},
+        )
+
+    storage_path = dataset.get("storage_path")
+    if not storage_path:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"error": "no_file", "message": "Dataset has not been uploaded yet."},
+        )
+
+    try:
+        raw_bytes = download_file(storage_path)
+    except Exception as exc:
+        logger.error(f"Failed downloading file from storage: {exc}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"error": "storage_error", "message": f"Could not retrieve dataset file: {exc}"},
+        )
+
+    effective_task = task_type or dataset.get("task_type", "GENERAL")
+    effective_target = target_column if target_column is not None else dataset.get("target_column")
+    file_type = dataset.get("file_type", "csv")
+
+    from app.agent.orchestrator import run_self_healing_agent_loop
+    try:
+        report = run_self_healing_agent_loop(
+            dataset_id=dataset_id,
+            file_bytes=raw_bytes,
+            file_type=file_type,
+            task_type=effective_task,
+            target_column=effective_target,
+            max_iterations=max_iterations,
+            project_id=project_id,
+            require_approval=require_approval,
+        )
+    except Exception as exc:
+        logger.exception(f"Self-healing loop failed on dataset {dataset_id}: {exc}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"error": "self_healing_failed", "message": f"Self-healing agent loop failed: {exc}"},
+        )
+
+    report_dict = report.model_dump(exclude={"cleaned_bytes"})
+    cleaned_bytes = report.cleaned_bytes
+    final_profile = report.final_profile
+    effective_status = report.status
+
+    if effective_status == "WAITING_APPROVAL":
+        profile_json = dataset.get("profile_json") or {}
+        profile_json["self_healing_report"] = report_dict
+        profile_json["pending_safe_actions"] = report.pending_safe_actions
+        try:
+            update_dataset_profile(dataset_id, profile_json)
+            client_db = get_service_client()
+            client_db.schema("data_agent").table("datasets").update({"status": "WAITING_APPROVAL"}).eq("id", dataset_id).execute()
+        except Exception as exc:
+            logger.warning(f"Could not persist self-healing report to DB: {exc}")
+
+        return {
+            "dataset_id": dataset_id,
+            "status": "WAITING_APPROVAL",
+            "task_type": effective_task,
+            "target_column": effective_target,
+            "report": report_dict,
+            "final_profile": dataset.get("profile_json") or {},
+            "version": None,
+            "pending_approvals": report.pending_approvals,
+            "pending_safe_actions": report.pending_safe_actions,
+            "total_rollbacks": report.total_rollbacks,
+            "download_url": f"/api/v1/projects/{project_id}/datasets/{dataset_id}/download",
+        }
+
+    # Upload cleaned file
+    cleaned_path = f"datasets/cleaned/{project_id}/{dataset_id}/cleaned_{dataset.get('original_filename', 'data.csv')}"
+    if cleaned_bytes:
+        try:
+            upload_file(cleaned_path, cleaned_bytes, content_type="text/csv")
+        except Exception as exc:
+            logger.warning(f"Could not upload cleaned file to storage ({exc}); proceeding.")
+
+    # Update profile & dataset record
+    profile_json = dataset.get("profile_json") or {}
+    profile_json["self_healing_report"] = report_dict
+    profile_json["cleaned_storage_path"] = cleaned_path
+    profile_json["shape"] = final_profile.get("shape", profile_json.get("shape"))
+    profile_json["total_null_pct"] = final_profile.get("total_null_pct", 0.0)
+    profile_json["duplicate_row_count"] = final_profile.get("duplicate_row_count", 0)
+    profile_json["columns"] = final_profile.get("columns", profile_json.get("columns"))
+    profile_json["issues"] = final_profile.get("issues", [])
+    profile_json["llm_summary"] = final_profile.get("llm_summary", profile_json.get("llm_summary"))
+
+    try:
+        update_dataset_profile(dataset_id, profile_json)
+        up_data = {"status": effective_status}
+        if target_column:
+            up_data["target_column"] = target_column
+        if task_type:
+            up_data["task_type"] = task_type
+        client_db = get_service_client()
+        client_db.schema("data_agent").table("datasets").update(up_data).eq("id", dataset_id).execute()
+    except Exception as exc:
+        logger.warning(f"Could not persist self-healing DB record: {exc}")
+
+    # Version snapshot
+    new_version = None
+    if cleaned_bytes:
+        try:
+            from app.services.versioning import create_dataset_version
+            shape = final_profile.get("shape", {})
+            action_desc = (
+                f"Self-Healing Agent Loop ({report.total_iterations} iters, "
+                f"{report.total_rollbacks} rollbacks)"
+            )
+            new_version = create_dataset_version(
+                dataset_id=dataset_id,
+                project_id=project_id,
+                file_bytes=cleaned_bytes,
+                file_type="csv",
+                action_name=action_desc,
+                action_details={
+                    "total_iterations": report.total_iterations,
+                    "total_rollbacks": report.total_rollbacks,
+                    "quality_improvement": report.overall_quality_improvement,
+                    "initial_quality": report.initial_quality_score,
+                    "final_quality": report.final_quality_score,
+                    "termination_reason": report.termination_reason,
+                },
+                metrics={
+                    "rows": shape.get("rows", 0),
+                    "columns": shape.get("columns", 0),
+                    "total_null_pct": final_profile.get("total_null_pct", 0.0),
+                    "duplicate_row_count": final_profile.get("duplicate_row_count", 0),
+                    "quality_score": report.final_quality_score,
+                    "total_rollbacks": report.total_rollbacks,
+                },
+                quality_score=report.final_quality_score,
+            )
+        except Exception as exc:
+            logger.warning(f"Could not snapshot version for self-healed dataset: {exc}")
+
+    return {
+        "dataset_id": dataset_id,
+        "status": effective_status,
+        "task_type": effective_task,
+        "target_column": effective_target,
+        "report": report_dict,
+        "final_profile": final_profile,
+        "version": new_version,
+        "total_rollbacks": report.total_rollbacks,
+        "pending_approvals": [],
+        "download_url": f"/api/v1/projects/{project_id}/datasets/{dataset_id}/download",
+    }
+
+
+@router.post(
+    "/api/v1/datasets/{dataset_id}/self-heal",
+    summary="Phase 14: Autonomous Self-Healing Agent Loop (direct)",
+    status_code=status.HTTP_200_OK,
+)
+def clean_direct_dataset_self_heal(
+    dataset_id: str,
+    task_type: Optional[str] = Query(default=None),
+    target_column: Optional[str] = Query(default=None),
+    max_iterations: int = Query(default=5, ge=1, le=5),
+    require_approval: bool = Query(default=True),
+):
+    """Direct route for self-healing agent loop without project_id in URL."""
+    dataset = get_dataset(dataset_id)
+    if not dataset:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "dataset_not_found", "message": f"Dataset '{dataset_id}' not found."},
+        )
+    return clean_project_dataset_self_heal(
         project_id=dataset["project_id"],
         dataset_id=dataset_id,
         task_type=task_type,
