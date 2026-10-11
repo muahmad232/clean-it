@@ -2717,6 +2717,25 @@ export default function DataCleaningCenter({
                   </div>
                 </div>
               ))}
+
+              {diagnosticData.insights?.cleaning_strategy && (
+                <div style={{
+                  marginTop: '0.85rem',
+                  padding: '0.75rem 0.95rem',
+                  background: 'var(--bg-surface)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: 'var(--radius-sm)',
+                  fontSize: '0.78rem',
+                }}>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--emerald-primary)', textTransform: 'uppercase', fontWeight: 600, marginBottom: '0.3rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                    <Sparkles size={12} />
+                    Recommended Cleaning Strategy
+                  </div>
+                  <div style={{ color: 'var(--text-primary)', whiteSpace: 'pre-line', lineHeight: 1.5 }}>
+                    {diagnosticData.insights.cleaning_strategy}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

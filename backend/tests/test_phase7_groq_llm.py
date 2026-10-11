@@ -345,3 +345,62 @@ def test_live_llm_analyze_endpoint():
     assert "cleaning_strategy" in insights
     assert data["provider"] == "Groq LPU"
 
+
+def test_dataset_ai_insights_resilience_missing_cleaning_strategy():
+    """Verify DatasetAiInsights succeeds when cleaning_strategy is omitted by LLM."""
+    from app.routers.llm import DatasetAiInsights, DefectEvaluation
+
+    raw_data = {
+        "health_grade": "B",
+        "readiness_score": 85,
+        "executive_summary": "Good dataset with minor issues.",
+        "primary_risks": ["Risk of outlier distortion"],
+        "defect_evaluations": [
+            {
+                "defect_title": "Outliers in Price",
+                "severity": "HIGH",
+                "impact_explanation": "Skews RMSE.",
+                "recommended_action": "Clip with IQR boundaries.",
+            }
+        ],
+    }
+    # Should not raise ValidationError even though cleaning_strategy is missing
+    insights = DatasetAiInsights.model_validate(raw_data)
+    assert insights.health_grade == "B"
+    assert insights.readiness_score == 85
+    assert "Clip with IQR" in insights.cleaning_strategy or "cleaning" in insights.cleaning_strategy.lower()
+
+
+def test_dataset_ai_insights_resilience_alternative_keys():
+    """Verify DatasetAiInsights maps cleaning_plan, percentage string score, etc."""
+    from app.routers.llm import DatasetAiInsights
+
+    raw_data = {
+        "health_grade": "a+",
+        "readiness_score": "95%",
+        "executive_summary": "Clean dataset.",
+        "cleaning_plan": ["Drop null rows", "Cast date format"],
+    }
+    insights = DatasetAiInsights.model_validate(raw_data)
+    assert insights.health_grade == "A+"
+    assert insights.readiness_score == 95
+    assert "Drop null rows" in insights.cleaning_strategy
+
+
+def test_defect_evaluation_resilience_alternative_keys():
+    """Verify DefectEvaluation normalizes title, action, etc."""
+    from app.routers.llm import DefectEvaluation
+
+    raw_data = {
+        "title": "Missing Age Values",
+        "level": "CRITICAL",
+        "impact": "Drops rows unnecessarily.",
+        "action": "Impute with median.",
+    }
+    defect = DefectEvaluation.model_validate(raw_data)
+    assert defect.defect_title == "Missing Age Values"
+    assert defect.severity == "CRITICAL"
+    assert defect.impact_explanation == "Drops rows unnecessarily."
+    assert defect.recommended_action == "Impute with median."
+
+
