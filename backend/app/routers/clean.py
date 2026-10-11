@@ -20,7 +20,7 @@ from fastapi import APIRouter, HTTPException, Query, Response, status
 
 from app.core.logging import get_logger
 from app.database.client import get_service_client
-from app.database.repositories.datasets import get_dataset, get_project, update_dataset_profile
+from app.database.repositories.datasets import get_dataset, get_project, update_dataset_profile, normalize_db_task_type
 from app.services.cleaner import clean_dataset
 from app.services.agent_cleaner import run_agentic_cleaning_cycle
 from app.models.chat_clean import ChatCleanRequest, ChatCleanResponse
@@ -29,6 +29,33 @@ from app.storage.supabase import download_file, upload_file
 logger = get_logger(__name__)
 
 router = APIRouter(tags=["Cleaning & Download"])
+
+
+def _evaluate_ml_safely(
+    raw_bytes: bytes,
+    cleaned_bytes: bytes,
+    target_column: Optional[str],
+    task_type: Optional[str],
+) -> Optional[dict]:
+    """Helper to benchmark ML performance without raising if evaluation fails or is not applicable."""
+    if not target_column:
+        return None
+    task_str = (task_type or "").upper()
+    if not any(k in task_str for k in ("REGRESS", "CLASSIF", "LOGISTIC")):
+        return None
+    try:
+        from app.agent.evaluator import evaluate_dataset_ml_benchmark
+        report = evaluate_dataset_ml_benchmark(
+            raw_data=raw_bytes,
+            cleaned_data=cleaned_bytes,
+            target_column=target_column,
+            task_type=task_type or "REGRESSION",
+        )
+        if report.status == "SUCCESS":
+            return report.model_dump()
+    except Exception as exc:
+        logger.debug(f"Could not compute ML evaluation: {exc}")
+    return None
 
 
 @router.post(
@@ -115,7 +142,7 @@ def clean_project_dataset(
         if target_column:
             update_data["target_column"] = target_column
         if task_type:
-            update_data["task_type"] = task_type
+            update_data["task_type"] = normalize_db_task_type(task_type)
 
         client = get_service_client()
         client.schema("data_agent").table("datasets").update(update_data).eq("id", dataset_id).execute()
@@ -175,6 +202,14 @@ def clean_project_dataset(
     except Exception as exc:
         logger.warning(f"Could not compute comparison for cleaned dataset: {exc}")
 
+    ml_eval_report = _evaluate_ml_safely(raw_bytes, cleaned_bytes, effective_target, effective_task)
+    if ml_eval_report:
+        profile_json["ml_evaluation"] = ml_eval_report
+        try:
+            update_dataset_profile(dataset_id, profile_json)
+        except Exception:
+            pass
+
     return {
         "dataset_id": dataset_id,
         "status": "CLEANED",
@@ -183,6 +218,7 @@ def clean_project_dataset(
         "report": report,
         "version": new_version,
         "comparison": comparison_report,
+        "ml_evaluation": ml_eval_report,
         "download_url": f"/api/v1/projects/{project_id}/datasets/{dataset_id}/download",
     }
 
@@ -352,7 +388,7 @@ def clean_project_dataset_agentic(
         if target_column:
             update_data["target_column"] = target_column
         if task_type:
-            update_data["task_type"] = task_type
+            update_data["task_type"] = normalize_db_task_type(task_type)
 
         client = get_service_client()
         client.schema("data_agent").table("datasets").update(update_data).eq("id", dataset_id).execute()
@@ -434,6 +470,15 @@ def clean_project_dataset_agentic(
     except Exception as exc:
         logger.warning(f"Could not compute comparison for agent-cleaned dataset: {exc}")
 
+    ml_eval_report = _evaluate_ml_safely(raw_bytes, cleaned_bytes, effective_target, effective_task)
+    if ml_eval_report:
+        profile_json["ml_evaluation"] = ml_eval_report
+        final_profile["ml_evaluation"] = ml_eval_report
+        try:
+            update_dataset_profile(dataset_id, profile_json)
+        except Exception:
+            pass
+
     return {
         "dataset_id": dataset_id,
         "status": effective_status,
@@ -444,6 +489,7 @@ def clean_project_dataset_agentic(
         "version": new_version,
         "comparison": comparison_report,
         "pending_approvals": pending_apprs,
+        "ml_evaluation": ml_eval_report,
         "download_url": f"/api/v1/projects/{project_id}/datasets/{dataset_id}/download",
     }
 
@@ -610,7 +656,7 @@ def clean_project_dataset_self_heal(
         if target_column:
             up_data["target_column"] = target_column
         if task_type:
-            up_data["task_type"] = task_type
+            up_data["task_type"] = normalize_db_task_type(task_type)
         client_db = get_service_client()
         client_db.schema("data_agent").table("datasets").update(up_data).eq("id", dataset_id).execute()
     except Exception as exc:
@@ -663,6 +709,15 @@ def clean_project_dataset_self_heal(
         except Exception:
             pass
 
+    ml_eval_report = _evaluate_ml_safely(raw_bytes, cleaned_bytes, effective_target, effective_task)
+    if ml_eval_report:
+        profile_json["ml_evaluation"] = ml_eval_report
+        final_profile["ml_evaluation"] = ml_eval_report
+        try:
+            update_dataset_profile(dataset_id, profile_json)
+        except Exception:
+            pass
+
     return {
         "dataset_id": dataset_id,
         "status": effective_status,
@@ -673,6 +728,7 @@ def clean_project_dataset_self_heal(
         "version": new_version,
         "total_rollbacks": report.total_rollbacks,
         "pending_approvals": [],
+        "ml_evaluation": ml_eval_report,
         "download_url": f"/api/v1/projects/{project_id}/datasets/{dataset_id}/download",
     }
 
@@ -837,7 +893,7 @@ def clean_project_dataset_chat(
         if effective_target:
             up_data["target_column"] = effective_target
         if effective_task:
-            up_data["task_type"] = effective_task
+            up_data["task_type"] = normalize_db_task_type(effective_task)
         client_db = get_service_client()
         client_db.schema("data_agent").table("datasets").update(up_data).eq("id", dataset_id).execute()
     except Exception as exc:
@@ -909,6 +965,15 @@ def clean_project_dataset_chat(
     if report.steps and report.steps[-1].comparison:
         comparison_dict = report.steps[-1].comparison.model_dump()
 
+    ml_eval_report = _evaluate_ml_safely(raw_bytes, cleaned_bytes, effective_target, effective_task)
+    if ml_eval_report:
+        profile_json["ml_evaluation"] = ml_eval_report
+        final_profile["ml_evaluation"] = ml_eval_report
+        try:
+            update_dataset_profile(dataset_id, profile_json)
+        except Exception:
+            pass
+
     return {
         "dataset_id": dataset_id,
         "user_instructions": payload.user_instructions,
@@ -922,6 +987,7 @@ def clean_project_dataset_chat(
         "total_rollbacks": report.total_rollbacks,
         "custom_scripts": report.custom_scripts_executed,
         "pending_approvals": [],
+        "ml_evaluation": ml_eval_report,
         "download_url": f"/api/v1/projects/{project_id}/datasets/{dataset_id}/download",
         "termination_reason": report.termination_reason,
     }

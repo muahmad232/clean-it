@@ -14,11 +14,11 @@ psycopg2-binary==2.9.10
 # ── Phase 4+: Data processing ────────────────────────────────────
 polars==1.30.0           # Lazy CSV/Parquet scanner — never pandas
 # duckdb==1.1.2          # Phase 5: SQL-based transformations
-# numpy==2.1.2
-# scipy==1.14.1
+numpy>=2.0.0
+scipy>=1.14.0
 
-# ── Phase 9+: ML evaluation ───────────────────────────────────────
-# scikit-learn==1.5.2
+# ── Phase 17: ML evaluation ───────────────────────────────────────
+scikit-learn>=1.5.0
 
 # ── Phase 7+: Groq ───────────────────────────────────────────────
 groq>=0.11.0

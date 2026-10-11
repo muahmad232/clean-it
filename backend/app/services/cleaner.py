@@ -125,7 +125,8 @@ def clean_dataset(
             logger.info(f"Dropped constant column '{col}'")
 
     # 6. Step 5: Task-Specific Identifier Dropping (Prevent Target Leakage)
-    if task_type in ("CLASSIFICATION", "REGRESSION", "LLM_FINETUNING", "CLUSTERING"):
+    t_upper = (task_type or "").upper()
+    if any(k in t_upper for k in ("CLASSIF", "REGRESS", "LOGISTIC", "LLM", "CLUSTER", "TIME_SERIES")):
         for col in list(df.columns):
             if col == target_column:
                 continue

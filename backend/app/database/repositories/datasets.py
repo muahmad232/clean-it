@@ -95,6 +95,22 @@ def claim_project(project_id: str, new_user_id: str) -> Optional[dict]:
 
 
 
+def normalize_db_task_type(task_type: Optional[str]) -> str:
+    """Normalize detailed task types to DB check-constraint allowed base enum."""
+    if not task_type:
+        return "GENERAL"
+    t = task_type.upper()
+    if any(k in t for k in ("CLASSIF", "LOGISTIC")):
+        return "CLASSIFICATION"
+    if "REGRESS" in t:
+        return "REGRESSION"
+    if "CLUSTER" in t:
+        return "CLUSTERING"
+    if "LLM" in t or "FINE" in t:
+        return "LLM_FINETUNING"
+    return "GENERAL"
+
+
 # ══════════════════════════════════════════════════════════════════
 # DATASETS
 # ══════════════════════════════════════════════════════════════════
@@ -102,14 +118,17 @@ def claim_project(project_id: str, new_user_id: str) -> Optional[dict]:
 def create_dataset(project_id: str, payload: DatasetCreate) -> dict:
     """Insert a new dataset metadata row. Returns the created record."""
     client = get_service_client()
+    raw_task = payload.task_type or "GENERAL"
+    db_task = normalize_db_task_type(raw_task)
     row = {
         "project_id": project_id,
         "original_filename": payload.original_filename,
         "file_type": payload.file_type,
         "file_size": payload.file_size,
-        "task_type": payload.task_type,
+        "task_type": db_task,
         "target_column": payload.target_column,
         "status": "PENDING_UPLOAD",
+        "profile_json": {"detailed_task_type": raw_task, "task_type": raw_task},
     }
     result = (
         client.schema(SCHEMA)
@@ -118,6 +137,7 @@ def create_dataset(project_id: str, payload: DatasetCreate) -> dict:
         .execute()
     )
     record = result.data[0]
+    record["task_type"] = raw_task
     logger.info(f"Created dataset id={record['id']} project={project_id}")
     return record
 
@@ -133,7 +153,14 @@ def get_dataset(dataset_id: str) -> Optional[dict]:
         .limit(1)
         .execute()
     )
-    return result.data[0] if result.data else None
+    if not result.data:
+        return None
+    record = result.data[0]
+    pj = record.get("profile_json") or {}
+    detailed = pj.get("detailed_task_type") or pj.get("task_type")
+    if detailed:
+        record["task_type"] = detailed
+    return record
 
 
 def list_datasets(project_id: str) -> list[dict]:
@@ -142,12 +169,19 @@ def list_datasets(project_id: str) -> list[dict]:
     result = (
         client.schema(SCHEMA)
         .table("datasets")
-        .select("id, original_filename, file_type, file_size, status, created_at")
+        .select("id, original_filename, file_type, file_size, status, created_at, profile_json")
         .eq("project_id", project_id)
         .order("created_at", desc=True)
         .execute()
     )
-    return result.data
+    records = []
+    for d in (result.data or []):
+        pj = d.get("profile_json") or {}
+        detailed = pj.get("detailed_task_type") or pj.get("task_type")
+        if detailed:
+            d["task_type"] = detailed
+        records.append(d)
+    return records
 
 
 def update_dataset_status(dataset_id: str, status: str, extra: Optional[dict] = None) -> dict:
@@ -159,7 +193,11 @@ def update_dataset_status(dataset_id: str, status: str, extra: Optional[dict] = 
     client = get_service_client()
     payload = {"status": status}
     if extra:
-        payload.update(extra)
+        extra_copy = dict(extra)
+        if "task_type" in extra_copy:
+            raw_t = extra_copy["task_type"]
+            extra_copy["task_type"] = normalize_db_task_type(raw_t)
+        payload.update(extra_copy)
     result = (
         client.schema(SCHEMA)
         .table("datasets")
@@ -191,7 +229,17 @@ def update_dataset_profile(dataset_id: str, profile_dict: dict) -> dict:
     # Preserve version lineage & cleaned file path if not in incoming profile_dict
     if existing:
         old_pj = existing.get("profile_json") or {}
-        for key in ["versions", "current_version", "version_number", "cleaned_storage_path", "self_healing_report", "latest_comparison"]:
+        for key in [
+            "versions",
+            "current_version",
+            "version_number",
+            "cleaned_storage_path",
+            "self_healing_report",
+            "latest_comparison",
+            "ml_evaluation",
+            "detailed_task_type",
+            "task_type",
+        ]:
             if key in old_pj and key not in profile_dict:
                 profile_dict[key] = old_pj[key]
 

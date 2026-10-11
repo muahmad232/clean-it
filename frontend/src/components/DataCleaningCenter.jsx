@@ -32,6 +32,10 @@ import {
   Send,
   Copy,
   Code,
+  Brain,
+  Target,
+  Award,
+  Activity,
 } from 'lucide-react'
 import {
   cleanDataset,
@@ -47,6 +51,8 @@ import {
   runSelfHealingClean,
   chatCleanDataset,
   downloadDatasetVersion,
+  evaluateDatasetMl,
+  fetchDatasetMlEvaluation,
 } from '../api'
 
 export default function DataCleaningCenter({
@@ -119,6 +125,13 @@ export default function DataCleaningCenter({
   const [chatHistory, setChatHistory] = useState([])
   const [copiedScriptId, setCopiedScriptId] = useState(null)
 
+  // Phase 17: ML-Aware Evaluation State (80/20 Holdout)
+  const [mlReport, setMlReport] = useState(
+    profile?.ml_evaluation || dataset?.profile_json?.ml_evaluation || null
+  )
+  const [mlLoading, setMlLoading] = useState(false)
+  const [mlError, setMlError] = useState(null)
+
   const loadComparison = async (vOld = null, vNew = null) => {
     if (!dataset?.id) return
     setComparisonLoading(true)
@@ -181,6 +194,11 @@ export default function DataCleaningCenter({
     if (profile?.versions && profile.versions.length > 0) {
       setVersionsList(profile.versions)
     }
+    if (profile?.ml_evaluation) {
+      setMlReport(profile.ml_evaluation)
+    } else if (dataset?.profile_json?.ml_evaluation) {
+      setMlReport(dataset.profile_json.ml_evaluation)
+    }
     loadVersions()
     loadApprovals()
   }, [dataset?.id, dataset?.current_version_id, profile?.version_number])
@@ -227,6 +245,9 @@ export default function DataCleaningCenter({
       }
       if (res?.comparison) {
         setComparisonReport(res.comparison)
+      }
+      if (res?.ml_evaluation) {
+        setMlReport(res.ml_evaluation)
       }
       if (res?.pending_approvals && res.pending_approvals.length > 0) {
         setPendingApprovals(res.pending_approvals)
@@ -433,6 +454,9 @@ export default function DataCleaningCenter({
       if (res.comparison) {
         setComparisonReport(res.comparison)
       }
+      if (res.ml_evaluation) {
+        setMlReport(res.ml_evaluation)
+      }
       if (onDatasetCleaned) {
         onDatasetCleaned(res)
       }
@@ -552,6 +576,9 @@ export default function DataCleaningCenter({
         if (res.comparison) {
           setComparisonReport(res.comparison)
         }
+        if (res.ml_evaluation) {
+          setMlReport(res.ml_evaluation)
+        }
         if (onDatasetCleaned) {
           onDatasetCleaned(res)
         }
@@ -565,6 +592,33 @@ export default function DataCleaningCenter({
     }
   }
 
+  // ── Handler 6: Phase 17 ML-Aware Evaluation (80/20 Holdout Benchmark) ──
+  const handleRunMlEvaluation = async (overrideTarget = null, overrideTask = null) => {
+    if (!dataset?.id) return
+    const tgt = (overrideTarget !== null && overrideTarget !== undefined ? overrideTarget : targetColumn)?.trim()
+    const tsk = overrideTask || selectedTask
+    setMlLoading(true)
+    setMlError(null)
+    try {
+      const res = await evaluateDatasetMl(
+        projectId || dataset?.project_id,
+        dataset.id,
+        {
+          targetColumn: tgt || null,
+          taskType: tsk,
+          testSize: 0.20,
+          randomState: 42,
+        }
+      )
+      setMlReport(res)
+    } catch (err) {
+      console.error('ML Evaluation failed:', err)
+      setMlError(err.message || 'ML evaluation failed.')
+    } finally {
+      setMlLoading(false)
+    }
+  }
+
   const handleCopyCode = (code, id) => {
     if (!code) return
     navigator.clipboard.writeText(code)
@@ -573,7 +627,7 @@ export default function DataCleaningCenter({
   }
 
   const downloadUrl = getDownloadUrl(projectId || dataset?.project_id, dataset?.id)
-  const isAnyCleaningActive = agentLoading || instantLoading || diagnosticLoading
+  const isAnyCleaningActive = agentLoading || instantLoading || diagnosticLoading || chatLoading || mlLoading
 
   const [downloadingVersion, setDownloadingVersion] = useState(null)
 
@@ -772,6 +826,39 @@ export default function DataCleaningCenter({
               </span>
             )}
           </button>
+          <button
+            onClick={() => {
+              setActiveMode('ml_evaluation')
+              if (!mlReport && !mlLoading) {
+                handleRunMlEvaluation()
+              }
+            }}
+            className={`btn btn-xs ${activeMode === 'ml_evaluation' ? 'btn-primary' : 'btn-ghost'}`}
+            style={{ fontSize: '0.75rem', padding: '0.25rem 0.65rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}
+          >
+            <Brain size={12} color={activeMode === 'ml_evaluation' ? 'inherit' : 'var(--cyan-primary, #06b6d4)'} />
+            ML Benchmark
+            <span style={{
+              background: 'rgba(6, 182, 212, 0.2)',
+              color: '#22d3ee',
+              borderRadius: '4px',
+              padding: '0.05rem 0.3rem',
+              fontSize: '0.62rem',
+              fontWeight: 700,
+            }}>
+              P17
+            </span>
+            {mlReport && mlReport.status === 'SUCCESS' && (
+              <span style={{
+                marginLeft: '0.25rem',
+                color: mlReport.primary_improved ? 'var(--emerald-primary)' : '#f43f5e',
+                fontWeight: 700,
+                fontSize: '0.7rem',
+              }}>
+                {mlReport.primary_improvement_pct >= 0 ? `+${mlReport.primary_improvement_pct.toFixed(1)}%` : `${mlReport.primary_improvement_pct.toFixed(1)}%`}
+              </span>
+            )}
+          </button>
         </div>
       </div>
 
@@ -809,11 +896,24 @@ export default function DataCleaningCenter({
               cursor: 'pointer',
             }}
           >
-            <option value="GENERAL">General Clean (Universal)</option>
-            <option value="CLASSIFICATION">Classification (Drop Identifiers / Leakage)</option>
-            <option value="REGRESSION">Regression (Median Impute & Outliers)</option>
-            <option value="LLM_FINETUNING">LLM Fine-tuning (Whitespace & Formatting)</option>
-            <option value="CLUSTERING">Clustering (Drop High Nulls & Constant)</option>
+            <optgroup label="General & Unsupervised">
+              <option value="GENERAL">General Clean (Universal)</option>
+              <option value="CLUSTERING">Clustering (Drop High Nulls & Constant)</option>
+              <option value="LLM_FINETUNING">LLM Fine-tuning (Whitespace & Formatting)</option>
+              <option value="TIME_SERIES">Time Series / Forecasting</option>
+            </optgroup>
+            <optgroup label="Regression Tasks (Numeric Targets)">
+              <option value="REGRESSION">Regression (General)</option>
+              <option value="LINEAR_REGRESSION">Linear Regression (Scale & Outliers)</option>
+              <option value="CONTINUOUS_REGRESSION">Continuous Regression (Target Impute)</option>
+              <option value="POLYNOMIAL_REGRESSION">Polynomial Regression (Feature Curves)</option>
+            </optgroup>
+            <optgroup label="Classification Tasks (Categorical / Discrete Targets)">
+              <option value="CLASSIFICATION">Classification (General)</option>
+              <option value="BINARY_CLASSIFICATION">Binary Classification (0/1 Balanced)</option>
+              <option value="MULTICLASS_CLASSIFICATION">Multi-Class Classification</option>
+              <option value="LOGISTIC_REGRESSION">Logistic Regression (Clean & Encode)</option>
+            </optgroup>
           </select>
         </div>
 
@@ -1067,6 +1167,37 @@ export default function DataCleaningCenter({
               )}
             </button>
           )}
+
+          {activeMode === 'ml_evaluation' && (
+            <button
+              onClick={() => handleRunMlEvaluation()}
+              disabled={isAnyCleaningActive}
+              className="btn btn-primary"
+              style={{
+                width: '100%',
+                padding: '0.45rem 0.85rem',
+                fontSize: '0.825rem',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '0.45rem',
+                background: 'linear-gradient(135deg, #06b6d4, #2563eb)',
+                borderColor: '#06b6d4',
+              }}
+            >
+              {mlLoading ? (
+                <>
+                  <Loader2 size={14} className="spin" />
+                  Benchmarking Holdout ML...
+                </>
+              ) : (
+                <>
+                  <Brain size={14} />
+                  Run ML Holdout Benchmark
+                </>
+              )}
+            </button>
+          )}
         </div>
       </div>
 
@@ -1087,9 +1218,13 @@ export default function DataCleaningCenter({
             {activeMode === 'agent_loop'
               ? selfHealingMode
                 ? 'Phase 14 Self-Healing Loop: Multi-iteration autonomous cycle with in-loop regression detection, auto rollback, and LLM re-planning (max 5 iters, 10 LLM calls).'
-                : 'Agent Loop: Qwen 3.8 27B plans tool actions &rarr; Polars executes deterministically &rarr; Re-profiles.'
+                : 'Agent Loop: Qwen 3.8 27B plans tool actions → Polars executes deterministically → Re-profiles.'
               : activeMode === 'instant_deterministic'
               ? 'Instant Mode: Pure deterministic Polars transformations (0 tokens consumed, runs in 5ms).'
+              : activeMode === 'ml_evaluation'
+              ? 'Phase 17 ML-Aware Evaluation: 80/20 train/test holdout benchmark evaluating generalization gains before vs. after cleaning with zero target leakage.'
+              : activeMode === 'chat_clean'
+              ? 'Phase 16 Chat Mode: Natural language dataset operations with AST sandboxed dynamic functions and human approvals.'
               : 'Diagnostic Mode: Compact fingerprint analyzed for defect impact (read-only, no modifications).'}
           </span>
         </div>
@@ -1099,7 +1234,7 @@ export default function DataCleaningCenter({
       </div>
 
       {/* Error Banners */}
-      {(agentError || instantError || diagnosticError) && (
+      {(agentError || instantError || diagnosticError || chatError || mlError) && (
         <div style={{
           background: 'var(--rose-bg)',
           border: '1px solid var(--rose-border)',
@@ -1113,7 +1248,7 @@ export default function DataCleaningCenter({
           gap: '0.5rem',
         }}>
           <AlertTriangle size={15} />
-          <span>{agentError || instantError || diagnosticError}</span>
+          <span>{agentError || instantError || diagnosticError || chatError || mlError}</span>
         </div>
       )}
 
@@ -3272,6 +3407,472 @@ export default function DataCleaningCenter({
               <p style={{ margin: 0, fontSize: '0.75rem' }}>
                 Type your dataset requirements above or select a Quick Task Template to start.
               </p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ══════════════════════════════════════════════════════════════ */}
+      {/* MODE 7: ML-Aware Evaluation & Generalization Benchmark (Phase 17) */}
+      {/* ══════════════════════════════════════════════════════════════ */}
+      {activeMode === 'ml_evaluation' && (
+        <div style={{
+          background: 'var(--bg-surface)',
+          border: '1px solid var(--border-medium)',
+          borderRadius: 'var(--radius-sm)',
+          padding: '1.25rem',
+          marginBottom: '1rem',
+        }}>
+          {/* Header */}
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '0.75rem',
+            marginBottom: '1.2rem',
+            paddingBottom: '0.85rem',
+            borderBottom: '1px solid var(--border-subtle)',
+          }}>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.2rem' }}>
+                <span style={{ fontWeight: 600, fontSize: '0.95rem', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                  <Brain size={16} color="var(--cyan-primary, #06b6d4)" />
+                  ML-Aware Holdout Evaluation & Generalization Benchmark
+                </span>
+                <span className="badge badge-muted" style={{ fontSize: '0.7rem' }}>
+                  Phase 17
+                </span>
+              </div>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '0.78rem', margin: 0 }}>
+                Benchmarks machine learning performance on an 80/20 train/test split strictly held out before data cleaning to verify generalization and eliminate target leakage.
+              </p>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <span className="badge badge-green" style={{ fontSize: '0.7rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                <ShieldCheck size={12} /> Zero Target Leakage Guard
+              </span>
+              {mlReport?.model_name && (
+                <span className="badge badge-muted" style={{ fontSize: '0.7rem' }}>
+                  {mlReport.model_name}
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Quick Target & Task Selector Bar */}
+          <div style={{
+            background: 'var(--bg-main)',
+            border: '1px solid var(--border-medium)',
+            borderRadius: 'var(--radius-sm)',
+            padding: '0.75rem 1rem',
+            marginBottom: '1rem',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '0.75rem',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                <Target size={13} color="var(--text-muted)" />
+                <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 500 }}>Target Column:</label>
+                {columns.length > 0 ? (
+                  <select
+                    value={targetColumn}
+                    onChange={(e) => setTargetColumn(e.target.value)}
+                    disabled={mlLoading}
+                    className="select-input"
+                    style={{
+                      fontSize: '0.76rem',
+                      padding: '0.25rem 0.55rem',
+                      background: 'var(--bg-surface)',
+                      color: 'var(--text-primary)',
+                      border: '1px solid var(--border-medium)',
+                      borderRadius: 'var(--radius-sm)',
+                    }}
+                  >
+                    <option value="">-- Auto-Detect Target --</option>
+                    {columns.map((c) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    placeholder="e.g. Price, Target"
+                    value={targetColumn}
+                    onChange={(e) => setTargetColumn(e.target.value)}
+                    disabled={mlLoading}
+                    style={{
+                      fontSize: '0.76rem',
+                      padding: '0.25rem 0.55rem',
+                      background: 'var(--bg-surface)',
+                      color: 'var(--text-primary)',
+                      border: '1px solid var(--border-medium)',
+                      borderRadius: 'var(--radius-sm)',
+                      width: '130px',
+                    }}
+                  />
+                )}
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                <Activity size={13} color="var(--text-muted)" />
+                <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 500 }}>ML Task:</label>
+                <select
+                  value={selectedTask}
+                  onChange={(e) => setSelectedTask(e.target.value)}
+                  disabled={mlLoading}
+                  className="select-input"
+                  style={{
+                    fontSize: '0.76rem',
+                    padding: '0.25rem 0.55rem',
+                    background: 'var(--bg-surface)',
+                    color: 'var(--text-primary)',
+                    border: '1px solid var(--border-medium)',
+                    borderRadius: 'var(--radius-sm)',
+                  }}
+                >
+                  <optgroup label="Regression Tasks (Numeric Targets)">
+                    <option value="REGRESSION">Regression (General)</option>
+                    <option value="LINEAR_REGRESSION">Linear Regression (Scale & Outliers)</option>
+                    <option value="CONTINUOUS_REGRESSION">Continuous Regression (Target Impute)</option>
+                    <option value="POLYNOMIAL_REGRESSION">Polynomial Regression (Feature Curves)</option>
+                  </optgroup>
+                  <optgroup label="Classification Tasks (Categorical / Discrete Targets)">
+                    <option value="CLASSIFICATION">Classification (General)</option>
+                    <option value="BINARY_CLASSIFICATION">Binary Classification (0/1 Balanced)</option>
+                    <option value="MULTICLASS_CLASSIFICATION">Multi-Class Classification</option>
+                    <option value="LOGISTIC_REGRESSION">Logistic Regression (Clean & Encode)</option>
+                  </optgroup>
+                </select>
+              </div>
+
+              <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+                Split: <strong style={{ color: 'var(--text-primary)' }}>80% Train / 20% Holdout</strong>
+              </div>
+            </div>
+
+            <button
+              onClick={() => handleRunMlEvaluation()}
+              disabled={mlLoading}
+              className="btn btn-sm btn-primary"
+              style={{
+                fontSize: '0.78rem',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.35rem',
+                padding: '0.35rem 0.85rem',
+                background: 'linear-gradient(135deg, #06b6d4, #2563eb)',
+                borderColor: '#06b6d4',
+              }}
+            >
+              {mlLoading ? <Loader2 size={13} className="spin" /> : <RefreshCw size={13} />}
+              {mlLoading ? 'Benchmarking...' : 'Re-Run ML Benchmark'}
+            </button>
+          </div>
+
+          {/* Loading Animation */}
+          {mlLoading && (
+            <div style={{
+              background: 'var(--bg-main)',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: 'var(--radius-sm)',
+              padding: '2.5rem 1.5rem',
+              textAlign: 'center',
+              marginBottom: '1rem',
+            }}>
+              <Loader2 size={32} className="spin" style={{ color: 'var(--cyan-primary, #06b6d4)', margin: '0 auto 1rem' }} />
+              <h4 style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.4rem' }}>
+                Executing ML Generalization Benchmark...
+              </h4>
+              <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', maxWidth: '520px', margin: '0 auto' }}>
+                Partitioning dataset into 80/20 train/test holdout &bull; Fitting baseline model on raw uncleaned data &bull; Fitting model on cleaned dataset &bull; Evaluating holdout R², RMSE, MAE or F1, Accuracy with zero leakage.
+              </p>
+            </div>
+          )}
+
+          {/* Case 1: Skipped Reason */}
+          {!mlLoading && mlReport && mlReport.status === 'SKIPPED' && (
+            <div style={{
+              background: 'rgba(245, 158, 11, 0.08)',
+              border: '1px solid rgba(245, 158, 11, 0.35)',
+              borderRadius: 'var(--radius-sm)',
+              padding: '1.25rem',
+              marginBottom: '1rem',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem', color: '#f59e0b', fontWeight: 600 }}>
+                <AlertTriangle size={16} />
+                <span>ML Evaluation Skipped</span>
+              </div>
+              <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', margin: '0 0 0.75rem 0' }}>
+                {mlReport.skip_reason || 'ML evaluation requires a supervised task type (Regression or Classification) and a designated target column.'}
+              </p>
+              <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>
+                👉 Select a target column from the dropdown above and choose a regression (e.g. Linear Regression, Continuous Regression) or classification task, then click <strong>Re-Run ML Benchmark</strong>.
+              </div>
+            </div>
+          )}
+
+          {/* Case 2: No Report Yet */}
+          {!mlLoading && !mlReport && (
+            <div style={{
+              textAlign: 'center',
+              padding: '2.5rem 1rem',
+              color: 'var(--text-muted)',
+              fontSize: '0.825rem',
+            }}>
+              <Brain size={36} style={{ margin: '0 auto 0.75rem', opacity: 0.4, color: 'var(--cyan-primary, #06b6d4)' }} />
+              <p style={{ margin: '0 0 0.35rem 0', fontWeight: 600, color: 'var(--text-primary)' }}>
+                No ML Evaluation Benchmark Run Yet
+              </p>
+              <p style={{ margin: '0 0 1rem 0', fontSize: '0.78rem', color: 'var(--text-secondary)', maxWidth: '480px', marginInline: 'auto' }}>
+                Evaluate how data cleaning transformations (imputation, outlier clipping, surrogate ID removal) impact model generalization on held-out test data.
+              </p>
+              <button
+                onClick={() => handleRunMlEvaluation()}
+                className="btn btn-sm btn-primary"
+                style={{
+                  fontSize: '0.8rem',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.35rem',
+                  padding: '0.4rem 1rem',
+                  background: 'linear-gradient(135deg, #06b6d4, #2563eb)',
+                  borderColor: '#06b6d4',
+                }}
+              >
+                <Brain size={13} /> Run ML Evaluation Benchmark
+              </button>
+            </div>
+          )}
+
+          {/* Case 3: SUCCESS Report */}
+          {!mlLoading && mlReport && mlReport.status === 'SUCCESS' && (
+            <div>
+              {/* Zero-Leakage Guarantee Banner */}
+              <div style={{
+                background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.08), rgba(6, 182, 212, 0.08))',
+                border: '1px solid rgba(16, 185, 129, 0.3)',
+                borderRadius: 'var(--radius-sm)',
+                padding: '0.75rem 1rem',
+                marginBottom: '1rem',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '0.5rem',
+                fontSize: '0.78rem',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                  <ShieldCheck size={16} color="var(--emerald-primary)" />
+                  <span style={{ color: 'var(--text-primary)', fontWeight: 500 }}>
+                    {mlReport.leakage_guard_notice}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', gap: '0.75rem', fontSize: '0.74rem', color: 'var(--text-secondary)' }}>
+                  <span>Train: <strong style={{ color: 'var(--text-primary)' }}>{mlReport.train_samples}</strong> rows</span>
+                  <span>Test: <strong style={{ color: 'var(--text-primary)' }}>{mlReport.test_samples}</strong> rows (20%)</span>
+                  <span>Features: <strong style={{ color: 'var(--text-primary)' }}>{mlReport.feature_count}</strong></span>
+                </div>
+              </div>
+
+              {/* Headline Metric Cards Grid */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))',
+                gap: '0.75rem',
+                marginBottom: '1rem',
+              }}>
+                {/* Card 1: Primary Headline Metric */}
+                <div style={{
+                  background: 'var(--bg-main)',
+                  border: '1px solid var(--border-medium)',
+                  borderRadius: 'var(--radius-sm)',
+                  padding: '1rem',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.35rem',
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>
+                      Headline: {mlReport.primary_metric_name}
+                    </span>
+                    <span
+                      className={`badge ${mlReport.primary_improved ? 'badge-green' : 'badge-rose'}`}
+                      style={{ fontSize: '0.68rem', display: 'flex', alignItems: 'center', gap: '0.2rem' }}
+                    >
+                      {mlReport.primary_improved ? <TrendingUp size={11} /> : <TrendingDown size={11} />}
+                      {mlReport.primary_improvement_pct >= 0 ? `+${mlReport.primary_improvement_pct.toFixed(1)}%` : `${mlReport.primary_improvement_pct.toFixed(1)}%`}
+                    </span>
+                  </div>
+
+                  <div style={{ fontSize: '1.6rem', fontWeight: 700, color: mlReport.primary_improved ? 'var(--emerald-primary)' : 'var(--text-primary)' }}>
+                    {typeof mlReport.primary_cleaned_score === 'number' ? mlReport.primary_cleaned_score.toFixed(3) : mlReport.primary_cleaned_score}
+                  </div>
+
+                  <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)' }}>
+                    Raw baseline: <span style={{ textDecoration: 'line-through', opacity: 0.7 }}>{typeof mlReport.primary_raw_score === 'number' ? mlReport.primary_raw_score.toFixed(3) : mlReport.primary_raw_score}</span>
+                    <span style={{ marginLeft: '0.4rem', color: mlReport.primary_improved ? 'var(--emerald-primary)' : '#f43f5e', fontWeight: 600 }}>
+                      ({mlReport.primary_cleaned_score >= mlReport.primary_raw_score ? '+' : ''}{(mlReport.primary_cleaned_score - mlReport.primary_raw_score).toFixed(3)})
+                    </span>
+                  </div>
+                </div>
+
+                {/* Card 2, 3, etc.: Secondary Metrics */}
+                {mlReport.metrics.filter((m) => m.metric_name !== mlReport.primary_metric_name).slice(0, 3).map((m, idx) => (
+                  <div key={idx} style={{
+                    background: 'var(--bg-main)',
+                    border: '1px solid var(--border-subtle)',
+                    borderRadius: 'var(--radius-sm)',
+                    padding: '1rem',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.35rem',
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>
+                        {m.metric_name}
+                      </span>
+                      <span
+                        className={`badge ${m.is_improved ? 'badge-green' : 'badge-muted'}`}
+                        style={{ fontSize: '0.68rem', display: 'flex', alignItems: 'center', gap: '0.2rem' }}
+                      >
+                        {m.is_improved ? <TrendingUp size={11} /> : null}
+                        {m.percent_change >= 0 ? `+${m.percent_change.toFixed(1)}%` : `${m.percent_change.toFixed(1)}%`}
+                      </span>
+                    </div>
+
+                    <div style={{ fontSize: '1.4rem', fontWeight: 700, color: m.is_improved ? 'var(--emerald-primary)' : 'var(--text-primary)' }}>
+                      {typeof m.cleaned_score === 'number' ? m.cleaned_score.toFixed(3) : m.cleaned_score}
+                    </div>
+
+                    <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)' }}>
+                      Raw baseline: <span style={{ textDecoration: 'line-through', opacity: 0.7 }}>{typeof m.raw_score === 'number' ? m.raw_score.toFixed(3) : m.raw_score}</span>
+                      <span style={{ marginLeft: '0.4rem', color: m.is_improved ? 'var(--emerald-primary)' : 'var(--text-muted)', fontWeight: 600 }}>
+                        ({m.delta >= 0 ? '+' : ''}{m.delta.toFixed(3)})
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Full Metrics Comparison Breakdown Table */}
+              <div style={{
+                background: 'var(--bg-main)',
+                border: '1px solid var(--border-medium)',
+                borderRadius: 'var(--radius-sm)',
+                padding: '0.85rem 1rem',
+                marginBottom: '1rem',
+              }}>
+                <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.65rem' }}>
+                  Complete Holdout Metrics Comparison
+                </div>
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', fontSize: '0.76rem', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid var(--border-subtle)', textAlign: 'left', color: 'var(--text-muted)' }}>
+                        <th style={{ padding: '0.35rem 0.5rem', fontWeight: 500 }}>Evaluation Metric</th>
+                        <th style={{ padding: '0.35rem 0.5rem', fontWeight: 500 }}>Raw Dataset (Baseline)</th>
+                        <th style={{ padding: '0.35rem 0.5rem', fontWeight: 500 }}>Cleaned Dataset (Holdout)</th>
+                        <th style={{ padding: '0.35rem 0.5rem', fontWeight: 500 }}>Net Delta</th>
+                        <th style={{ padding: '0.35rem 0.5rem', fontWeight: 500 }}>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {mlReport.metrics.map((m, idx) => (
+                        <tr key={idx} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                          <td style={{ padding: '0.45rem 0.5rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                            {m.metric_name}
+                          </td>
+                          <td style={{ padding: '0.45rem 0.5rem', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>
+                            {typeof m.raw_score === 'number' ? m.raw_score.toFixed(4) : m.raw_score}
+                          </td>
+                          <td style={{ padding: '0.45rem 0.5rem', fontWeight: 700, color: m.is_improved ? 'var(--emerald-primary)' : 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
+                            {typeof m.cleaned_score === 'number' ? m.cleaned_score.toFixed(4) : m.cleaned_score}
+                          </td>
+                          <td style={{ padding: '0.45rem 0.5rem', fontFamily: 'var(--font-mono)', color: m.is_improved ? 'var(--emerald-primary)' : '#f43f5e' }}>
+                            {m.delta >= 0 ? `+${m.delta.toFixed(4)}` : m.delta.toFixed(4)} ({m.percent_change >= 0 ? `+${m.percent_change.toFixed(1)}%` : `${m.percent_change.toFixed(1)}%`})
+                          </td>
+                          <td style={{ padding: '0.45rem 0.5rem' }}>
+                            <span className={`badge ${m.is_improved ? 'badge-green' : 'badge-muted'}`} style={{ fontSize: '0.65rem' }}>
+                              {m.is_improved ? 'IMPROVED' : 'MAINTAINED'}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Predictive Feature Importance (Top Features) */}
+              {mlReport.top_features && mlReport.top_features.length > 0 && (
+                <div style={{
+                  background: 'var(--bg-main)',
+                  border: '1px solid var(--border-medium)',
+                  borderRadius: 'var(--radius-sm)',
+                  padding: '0.85rem 1rem',
+                  marginBottom: '1rem',
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                    <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                      <BarChart2 size={13} color="var(--emerald-primary)" />
+                      Top Predictive Features (Cleaned Model Importance)
+                    </div>
+                    <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                      Model: {mlReport.model_name}
+                    </span>
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                    {mlReport.top_features.map((feat, idx) => {
+                      const pct = Math.round(feat.importance * 100)
+                      return (
+                        <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', fontSize: '0.76rem' }}>
+                          <span style={{ minWidth: '130px', fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {feat.feature}
+                          </span>
+                          <div style={{ flex: 1, height: '8px', background: 'var(--bg-surface)', borderRadius: '4px', overflow: 'hidden' }}>
+                            <div style={{
+                              width: `${Math.max(4, Math.min(100, pct))}%`,
+                              height: '100%',
+                              background: 'linear-gradient(90deg, #06b6d4, #10b981)',
+                              borderRadius: '4px',
+                            }} />
+                          </div>
+                          <span style={{ minWidth: '45px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--text-secondary)' }}>
+                            {pct}%
+                          </span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Executive Summary Callout */}
+              {mlReport.summary && (
+                <div style={{
+                  background: 'rgba(6, 182, 212, 0.06)',
+                  border: '1px solid rgba(6, 182, 212, 0.25)',
+                  borderRadius: 'var(--radius-sm)',
+                  padding: '0.85rem 1rem',
+                  fontSize: '0.78rem',
+                  color: 'var(--text-primary)',
+                  lineHeight: 1.5,
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontWeight: 600, color: 'var(--cyan-primary, #06b6d4)', marginBottom: '0.25rem' }}>
+                    <Award size={13} />
+                    <span>ML Benchmark Executive Summary</span>
+                  </div>
+                  <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
+                    {mlReport.summary}
+                  </p>
+                </div>
+              )}
             </div>
           )}
         </div>

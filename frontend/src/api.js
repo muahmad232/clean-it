@@ -630,5 +630,49 @@ export async function chatCleanDataset(projectId, datasetId, payload) {
   return await res.json()
 }
 
+/**
+ * Phase 17: ML-Aware Evaluation
+ */
+export async function evaluateDatasetMl(projectId, datasetId, options = {}) {
+  const url = projectId
+    ? `${API_BASE}/api/v1/projects/${projectId}/datasets/${datasetId}/evaluate-ml`
+    : `${API_BASE}/api/v1/datasets/${datasetId}/evaluate-ml`
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...getAuthHeaders(),
+    },
+    body: JSON.stringify({
+      target_column: options.targetColumn || null,
+      task_type: options.taskType || null,
+      test_size: options.testSize || 0.20,
+      random_state: options.randomState || 42,
+    }),
+  })
+
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({}))
+    throw new Error(errBody.detail?.message || errBody.detail?.error || errBody.message || `ML evaluation failed (HTTP ${res.status})`)
+  }
+  return await res.json()
+}
+
+export async function fetchDatasetMlEvaluation(projectId, datasetId) {
+  const url = projectId
+    ? `${API_BASE}/api/v1/projects/${projectId}/datasets/${datasetId}/evaluation`
+    : `${API_BASE}/api/v1/datasets/${datasetId}/evaluation`
+
+  const res = await fetch(url, {
+    headers: getAuthHeaders(),
+  })
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({}))
+    throw new Error(errBody.detail?.message || errBody.detail?.error || `Could not fetch ML evaluation (HTTP ${res.status})`)
+  }
+  return await res.json()
+}
+
 
 

@@ -107,11 +107,24 @@ export default function UploadZone({ onUploadComplete, isUploading, uploadProgre
               outline: 'none',
             }}
           >
-            <option value="GENERAL">General Clean</option>
-            <option value="CLASSIFICATION">Classification (Drop IDs)</option>
-            <option value="REGRESSION">Regression (Median Impute)</option>
-            <option value="CLUSTERING">Clustering</option>
-            <option value="LLM_FINETUNING">LLM Fine-tuning</option>
+            <optgroup label="General / Unsupervised">
+              <option value="GENERAL">General Clean (Universal)</option>
+              <option value="CLUSTERING">Clustering / PCA</option>
+              <option value="LLM_FINETUNING">LLM Fine-tuning</option>
+              <option value="TIME_SERIES">Time Series / Forecasting</option>
+            </optgroup>
+            <optgroup label="Regression Tasks (Numeric Targets)">
+              <option value="REGRESSION">Regression (General)</option>
+              <option value="LINEAR_REGRESSION">Linear Regression (Scale & Outliers)</option>
+              <option value="CONTINUOUS_REGRESSION">Continuous Regression (Target Impute)</option>
+              <option value="POLYNOMIAL_REGRESSION">Polynomial Regression</option>
+            </optgroup>
+            <optgroup label="Classification Tasks (Discrete Targets)">
+              <option value="CLASSIFICATION">Classification (General)</option>
+              <option value="BINARY_CLASSIFICATION">Binary Classification (Churn / Fraud)</option>
+              <option value="MULTICLASS_CLASSIFICATION">Multi-Class Classification</option>
+              <option value="LOGISTIC_REGRESSION">Logistic Regression</option>
+            </optgroup>
           </select>
 
           <button

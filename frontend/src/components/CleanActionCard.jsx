@@ -117,15 +117,28 @@ export default function CleanActionCard({
                 cursor: 'pointer',
               }}
             >
-              <option value="GENERAL">General Clean</option>
-              <option value="CLASSIFICATION">Classification (Drop Identifiers / Leakage)</option>
-              <option value="REGRESSION">Regression (Median Impute)</option>
-              <option value="CLUSTERING">Clustering (Drop High Nulls & IDs)</option>
-              <option value="LLM_FINETUNING">LLM Fine-tuning (Whitespace & Noise Fix)</option>
+              <optgroup label="General / Unsupervised">
+                <option value="GENERAL">General Clean (Universal)</option>
+                <option value="CLUSTERING">Clustering / PCA</option>
+                <option value="LLM_FINETUNING">LLM Fine-tuning</option>
+                <option value="TIME_SERIES">Time Series / Forecasting</option>
+              </optgroup>
+              <optgroup label="Regression Tasks (Numeric Targets)">
+                <option value="REGRESSION">Regression (General)</option>
+                <option value="LINEAR_REGRESSION">Linear Regression (Scale & Outliers)</option>
+                <option value="CONTINUOUS_REGRESSION">Continuous Regression (Target Impute)</option>
+                <option value="POLYNOMIAL_REGRESSION">Polynomial Regression</option>
+              </optgroup>
+              <optgroup label="Classification Tasks (Discrete Targets)">
+                <option value="CLASSIFICATION">Classification (General)</option>
+                <option value="BINARY_CLASSIFICATION">Binary Classification (Churn / Fraud)</option>
+                <option value="MULTICLASS_CLASSIFICATION">Multi-Class Classification</option>
+                <option value="LOGISTIC_REGRESSION">Logistic Regression</option>
+              </optgroup>
             </select>
           </div>
 
-          {(taskType === 'CLASSIFICATION' || taskType === 'REGRESSION') && (
+          {(['CLASSIFICATION', 'BINARY_CLASSIFICATION', 'MULTICLASS_CLASSIFICATION', 'LOGISTIC_REGRESSION', 'REGRESSION', 'LINEAR_REGRESSION', 'CONTINUOUS_REGRESSION', 'POLYNOMIAL_REGRESSION'].includes(taskType)) && (
             <div>
               <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.25rem', fontWeight: 500 }}>
                 Target Column (Protected)

@@ -170,6 +170,10 @@ def _register_routes(app: FastAPI) -> None:
     from app.routers.comparison import router as comparison_router
     app.include_router(comparison_router)
 
+    # Phase 17: ML-Aware Evaluation
+    from app.routers.evaluation import router as evaluation_router
+    app.include_router(evaluation_router)
+
     @app.get(
         "/health",
         tags=["System"],
