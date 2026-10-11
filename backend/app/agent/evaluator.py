@@ -63,6 +63,77 @@ def _is_surrogate_identifier(col_name: str, series: pl.Series) -> bool:
     return False
 
 
+def infer_target_column(df: pl.DataFrame, task_type: str = "REGRESSION") -> Optional[str]:
+    """
+    Auto-infer candidate target column when task_type is supervised but target_column is not provided.
+    Evaluates column names against domain heuristics, then falls back to column cardinality/type properties.
+    """
+    if df is None or len(df.columns) == 0:
+        return None
+
+    task_normalized = (task_type or "REGRESSION").upper()
+    is_classification = ("CLASSIF" in task_normalized) or ("LOGISTIC" in task_normalized)
+
+    cols = list(df.columns)
+
+    # 1. Check strong target name conventions
+    if is_classification:
+        priority_names = [
+            "target", "label", "class", "churn", "outcome", "status",
+            "fraud", "default", "purchased", "is_churn", "churned",
+            "sentiment", "survived", "converted", "decision", "y", "is_fraud"
+        ]
+    else:
+        priority_names = [
+            "target", "price", "sale_price", "saleprice", "cost",
+            "salary", "revenue", "sales", "amount", "score", "value",
+            "total", "loss", "rating", "duration", "fare", "tip", "y", "target_price"
+        ]
+
+    cols_lower_map = {c.lower(): c for c in cols}
+    for p in priority_names:
+        if p in cols_lower_map:
+            candidate = cols_lower_map[p]
+            if not _is_surrogate_identifier(candidate, df[candidate]):
+                return candidate
+        for c in cols:
+            cl = c.lower()
+            if (cl.endswith(f"_{p}") or cl.startswith(f"{p}_")) and not _is_surrogate_identifier(c, df[c]):
+                return c
+
+    # 2. Check candidate by data type & cardinality (avoiding surrogate identifiers)
+    non_id_cols = [c for c in cols if not _is_surrogate_identifier(c, df[c])]
+    if not non_id_cols:
+        non_id_cols = cols
+
+    if is_classification:
+        # Prefer low-cardinality categorical, boolean, or integer columns (2 to 20 unique non-null values)
+        for c in reversed(non_id_cols):
+            s = df[c]
+            n_unique = s.n_unique()
+            if 2 <= n_unique <= 20:
+                return c
+    else:
+        # Prefer numeric float or non-identifier int column with > 5 unique values
+        numeric_candidates = []
+        for c in non_id_cols:
+            s = df[c]
+            if s.dtype in (pl.Float32, pl.Float64, pl.Int32, pl.Int64, pl.Int16, pl.Int8):
+                if s.n_unique() > 5:
+                    numeric_candidates.append(c)
+        if numeric_candidates:
+            # Usually the last numeric column in ML benchmarks is the target
+            return numeric_candidates[-1]
+
+    # Fallback to last column if non-id
+    for c in reversed(cols):
+        if not _is_surrogate_identifier(c, df[c]):
+            return c
+
+    return cols[-1] if cols else None
+
+
+
 def _prepare_feature_matrices(
     df: pl.DataFrame,
     target_column: str,
@@ -163,19 +234,10 @@ def evaluate_dataset_ml_benchmark(
             skip_reason=f"Task '{task_type}' is unsupervised or general. ML benchmark is activated for regression and classification tasks.",
         )
 
-    if not target_column:
-        return MLEvaluationReport(
-            task_type=task_type,
-            target_column="",
-            model_name="N/A",
-            status="SKIPPED",
-            skip_reason="No target column specified. Select a protected target column to run ML-aware benchmark.",
-        )
-
     if raw_input is None or cleaned_input is None:
         return MLEvaluationReport(
             task_type=task_type,
-            target_column=target_column,
+            target_column=target_column or "",
             model_name="N/A",
             status="SKIPPED",
             skip_reason="Raw or cleaned dataset data was not provided.",
@@ -188,11 +250,30 @@ def evaluate_dataset_ml_benchmark(
         logger.warning(f"Failed to parse data for ML evaluation: {exc}")
         return MLEvaluationReport(
             task_type=task_type,
-            target_column=target_column,
+            target_column=target_column or "",
             model_name="N/A",
             status="FAILED",
             skip_reason=f"Failed to read dataset tables: {exc}",
         )
+
+    # 2. Target Column Resolution (Auto-infer if omitted)
+    target_inferred = False
+    effective_target = target_column
+    if not effective_target:
+        effective_target = infer_target_column(cleaned_df, task_type) or infer_target_column(raw_df, task_type)
+        if effective_target:
+            target_inferred = True
+
+    if not effective_target:
+        return MLEvaluationReport(
+            task_type=task_type,
+            target_column="",
+            model_name="N/A",
+            status="SKIPPED",
+            skip_reason="No target column specified and unable to auto-infer candidate target column. Select a protected target column to run ML-aware benchmark.",
+        )
+
+    target_column = effective_target
 
     # 2. Validate Target Column Existence
     if target_column not in raw_df.columns:
@@ -531,6 +612,7 @@ def evaluate_dataset_ml_benchmark(
     return MLEvaluationReport(
         task_type=task_type,
         target_column=target_column,
+        target_inferred=target_inferred,
         model_name=model_name,
         train_samples=len(X_raw_train),
         test_samples=len(X_raw_test),

@@ -298,6 +298,18 @@ export default function DataCleaningCenter({
       if (res.comparison) {
         setComparisonReport(res.comparison)
       }
+      if (res.ml_evaluation) {
+        setMlReport(res.ml_evaluation)
+      } else if (res.final_profile?.ml_evaluation) {
+        setMlReport(res.final_profile.ml_evaluation)
+      }
+      try {
+        if (feedbackText) {
+          const parsed = JSON.parse(feedbackText)
+          if (parsed.task_type) setSelectedTask(parsed.task_type)
+          if (parsed.target_column) setTargetColumn(parsed.target_column)
+        }
+      } catch (e) {}
 
       // Update chatHistory items so in-stream approvals reflect the new version
       setChatHistory((prev) =>
@@ -1333,6 +1345,284 @@ export default function DataCleaningCenter({
                 .join(' ')
             }
 
+            if (item.action_type === 'clarify_task_objective') {
+              const q = item.parameters?.clarification_question || item.reasoning
+              const suggestedTask = item.parameters?.suggested_task_type || 'REGRESSION'
+              const suggestedTarget = item.parameters?.suggested_target_column || ''
+              const options = item.parameters?.suggested_options || []
+
+              return (
+                <div
+                  key={item.id}
+                  style={{
+                    background: 'linear-gradient(135deg, rgba(6, 182, 212, 0.08), rgba(99, 102, 241, 0.08))',
+                    border: '1px solid rgba(6, 182, 212, 0.45)',
+                    borderRadius: 'var(--radius-sm)',
+                    padding: '1.25rem',
+                    position: 'relative',
+                    boxShadow: '0 4px 18px -4px rgba(6, 182, 212, 0.15)',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.65rem', marginBottom: '0.85rem', paddingBottom: '0.65rem', borderBottom: '1px solid rgba(6, 182, 212, 0.2)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                      <div style={{
+                        background: 'rgba(6, 182, 212, 0.15)',
+                        padding: '0.45rem',
+                        borderRadius: 'var(--radius-sm)',
+                        border: '1px solid rgba(6, 182, 212, 0.35)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}>
+                        <Brain size={18} color="var(--cyan-primary, #06b6d4)" />
+                      </div>
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                          <h4 style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-primary)', margin: 0 }}>
+                            AI Agent Clarification: Task & Target Objective
+                          </h4>
+                          <span className="badge badge-primary" style={{ fontSize: '0.68rem', fontWeight: 700, background: 'rgba(6, 182, 212, 0.2)', color: 'var(--cyan-primary, #06b6d4)' }}>
+                            Clarification Needed
+                          </span>
+                        </div>
+                        <p style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', margin: '0.2rem 0 0 0' }}>
+                          The LLM paused execution because the intended machine learning task or target variable is ambiguous.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Clarification Question Box */}
+                  <div style={{
+                    background: 'var(--bg-main)',
+                    border: '1px solid var(--border-medium)',
+                    borderRadius: 'var(--radius-sm)',
+                    padding: '0.85rem 1rem',
+                    marginBottom: '0.85rem',
+                  }}>
+                    <div style={{ fontSize: '0.72rem', color: 'var(--cyan-primary, #06b6d4)', textTransform: 'uppercase', fontWeight: 600, marginBottom: '0.35rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                      <Bot size={13} />
+                      Agent Question:
+                    </div>
+                    <p style={{ fontSize: '0.85rem', color: 'var(--text-primary)', fontWeight: 500, margin: '0 0 0.65rem 0' }}>
+                      {q}
+                    </p>
+
+                    {/* Quick Selection Options Buttons */}
+                    {options && options.length > 0 && (
+                      <div>
+                        <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', display: 'block', marginBottom: '0.35rem' }}>
+                          Suggested Options:
+                        </span>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
+                          {options.map((opt, oIdx) => (
+                            <button
+                              key={oIdx}
+                              type="button"
+                              onClick={() => {
+                                const optUpper = opt.toUpperCase()
+                                let matchedTask = 'REGRESSION'
+                                if (optUpper.includes('REGRESS') || optUpper.includes('PRICE') || optUpper.includes('CONTINUOUS')) {
+                                  matchedTask = 'REGRESSION'
+                                } else if (optUpper.includes('CLASSIF') || optUpper.includes('CHURN') || optUpper.includes('FRAUD')) {
+                                  matchedTask = 'CLASSIFICATION'
+                                } else if (optUpper.includes('GENERAL')) {
+                                  matchedTask = 'GENERAL'
+                                }
+                                setSelectedTask(matchedTask)
+                                if (suggestedTarget && !targetColumn) {
+                                  setTargetColumn(suggestedTarget)
+                                }
+                                setApprovalFeedback(prev => ({
+                                  ...prev,
+                                  [item.id]: JSON.stringify({
+                                    task_type: matchedTask,
+                                    target_column: suggestedTarget || targetColumn,
+                                    selected_option: opt,
+                                  })
+                                }))
+                              }}
+                              className="btn btn-xs btn-outline"
+                              style={{
+                                fontSize: '0.74rem',
+                                padding: '0.25rem 0.55rem',
+                                borderRadius: '999px',
+                                background: 'var(--bg-surface)',
+                              }}
+                            >
+                              {opt}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Task & Target Selectors */}
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                    gap: '0.75rem',
+                    background: 'var(--bg-surface)',
+                    border: '1px solid var(--border-subtle)',
+                    borderRadius: 'var(--radius-sm)',
+                    padding: '0.75rem 0.9rem',
+                    marginBottom: '0.85rem',
+                    fontSize: '0.78rem',
+                  }}>
+                    <div>
+                      <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', display: 'block', marginBottom: '0.25rem', fontWeight: 600 }}>
+                        Target Task
+                      </label>
+                      <select
+                        value={selectedTask}
+                        onChange={(e) => {
+                          setSelectedTask(e.target.value)
+                          setApprovalFeedback(prev => ({
+                            ...prev,
+                            [item.id]: JSON.stringify({
+                              task_type: e.target.value,
+                              target_column: targetColumn,
+                            })
+                          }))
+                        }}
+                        style={{
+                          width: '100%',
+                          background: 'var(--bg-main)',
+                          border: '1px solid var(--border-medium)',
+                          color: 'var(--text-primary)',
+                          borderRadius: 'var(--radius-sm)',
+                          padding: '0.35rem 0.6rem',
+                          fontSize: '0.78rem',
+                        }}
+                      >
+                        <optgroup label="Regression Tasks (Numeric Targets)">
+                          <option value="REGRESSION">Regression (General)</option>
+                          <option value="LINEAR_REGRESSION">Linear Regression</option>
+                          <option value="CONTINUOUS_REGRESSION">Continuous Regression</option>
+                        </optgroup>
+                        <optgroup label="Classification Tasks (Discrete Targets)">
+                          <option value="CLASSIFICATION">Classification (General)</option>
+                          <option value="BINARY_CLASSIFICATION">Binary Classification</option>
+                          <option value="LOGISTIC_REGRESSION">Logistic Regression</option>
+                        </optgroup>
+                        <optgroup label="Unsupervised / Other">
+                          <option value="GENERAL">General Data Cleaning</option>
+                        </optgroup>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', display: 'block', marginBottom: '0.25rem', fontWeight: 600 }}>
+                        Target Column
+                      </label>
+                      {columns.length > 0 ? (
+                        <select
+                          value={targetColumn || suggestedTarget}
+                          onChange={(e) => {
+                            setTargetColumn(e.target.value)
+                            setApprovalFeedback(prev => ({
+                              ...prev,
+                              [item.id]: JSON.stringify({
+                                task_type: selectedTask,
+                                target_column: e.target.value,
+                              })
+                            }))
+                          }}
+                          style={{
+                            width: '100%',
+                            background: 'var(--bg-main)',
+                            border: '1px solid var(--border-medium)',
+                            color: 'var(--text-primary)',
+                            borderRadius: 'var(--radius-sm)',
+                            padding: '0.35rem 0.6rem',
+                            fontSize: '0.78rem',
+                          }}
+                        >
+                          <option value="">-- Select Target Column --</option>
+                          {columns.map(c => (
+                            <option key={c} value={c}>{c}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          type="text"
+                          value={targetColumn || suggestedTarget}
+                          onChange={(e) => {
+                            setTargetColumn(e.target.value)
+                            setApprovalFeedback(prev => ({
+                              ...prev,
+                              [item.id]: JSON.stringify({
+                                task_type: selectedTask,
+                                target_column: e.target.value,
+                              })
+                            }))
+                          }}
+                          placeholder="e.g. price, churn"
+                          style={{
+                            width: '100%',
+                            background: 'var(--bg-main)',
+                            border: '1px solid var(--border-medium)',
+                            color: 'var(--text-primary)',
+                            borderRadius: 'var(--radius-sm)',
+                            padding: '0.35rem 0.6rem',
+                            fontSize: '0.78rem',
+                          }}
+                        />
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Action Buttons */}
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      onClick={() => handleRejectAction(item.id)}
+                      disabled={isProcessing}
+                      className="btn btn-ghost btn-sm"
+                      style={{
+                        fontSize: '0.78rem',
+                        border: '1px solid var(--border-medium)',
+                        color: 'var(--text-secondary)',
+                        padding: '0.35rem 0.8rem',
+                      }}
+                    >
+                      {isProcessing ? <Loader2 size={12} className="spin" /> : <X size={13} />}
+                      Skip / Continue General Cleaning
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const feedbackPayload = approvalFeedback[item.id] || JSON.stringify({
+                          task_type: selectedTask || suggestedTask,
+                          target_column: targetColumn || suggestedTarget,
+                        })
+                        approvalFeedback[item.id] = feedbackPayload
+                        handleApproveAction(item.id)
+                      }}
+                      disabled={isProcessing}
+                      className="btn btn-sm"
+                      style={{
+                        fontSize: '0.78rem',
+                        background: 'linear-gradient(135deg, #06b6d4, #2563eb)',
+                        borderColor: '#06b6d4',
+                        color: '#fff',
+                        fontWeight: 600,
+                        padding: '0.35rem 1rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.4rem',
+                      }}
+                    >
+                      {isProcessing ? <Loader2 size={12} className="spin" /> : <Check size={14} />}
+                      Confirm Task & Resume Pipeline
+                    </button>
+                  </div>
+                </div>
+              )
+            }
+
             return (
               <div
                 key={item.id}
@@ -1700,6 +1990,76 @@ export default function DataCleaningCenter({
         )
       })()}
 
+          {/* ML Readiness Summary in Agent Loop Results */}
+          {mlReport && mlReport.status === 'SUCCESS' && (
+            <div style={{
+              background: 'linear-gradient(135deg, rgba(6, 182, 212, 0.05), rgba(37, 99, 235, 0.05))',
+              border: '1px solid rgba(6, 182, 212, 0.3)',
+              borderRadius: 'var(--radius-sm)',
+              padding: '0.85rem 1rem',
+              marginBottom: '1rem',
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.65rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                  <Brain size={15} color="var(--cyan-primary, #06b6d4)" />
+                  <span style={{ fontWeight: 600, fontSize: '0.85rem', color: 'var(--text-primary)' }}>
+                    ML Task Readiness Benchmark ({mlReport.model_name})
+                  </span>
+                  <span className="badge badge-green" style={{ fontSize: '0.68rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                    <ShieldCheck size={11} /> 0% Leakage (80/20 Holdout)
+                  </span>
+                  {mlReport.target_inferred && (
+                    <span className="badge badge-muted" style={{ fontSize: '0.66rem' }}>
+                      Auto-Inferred Target: {mlReport.target_column}
+                    </span>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveMode('ml_evaluation')}
+                  className="btn btn-xs btn-ghost"
+                  style={{ fontSize: '0.72rem', color: 'var(--cyan-primary, #06b6d4)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
+                >
+                  <Activity size={12} /> View Full Evaluation Deep Dive &rarr;
+                </button>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.65rem' }}>
+                <div style={{ background: 'var(--bg-surface)', padding: '0.65rem 0.85rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-subtle)' }}>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+                    Headline: {mlReport.primary_metric_name}
+                  </div>
+                  <div style={{ fontSize: '1.25rem', fontWeight: 700, color: mlReport.primary_improved ? 'var(--emerald-primary)' : 'var(--text-primary)', marginTop: '0.15rem' }}>
+                    {typeof mlReport.primary_cleaned_score === 'number' ? mlReport.primary_cleaned_score.toFixed(3) : mlReport.primary_cleaned_score}
+                    <span style={{ fontSize: '0.75rem', marginLeft: '0.4rem', fontWeight: 500, color: mlReport.primary_improved ? 'var(--emerald-primary)' : '#f43f5e' }}>
+                      ({mlReport.primary_improvement_pct >= 0 ? '+' : ''}{mlReport.primary_improvement_pct.toFixed(1)}%)
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
+                    Raw baseline: {typeof mlReport.primary_raw_score === 'number' ? mlReport.primary_raw_score.toFixed(3) : mlReport.primary_raw_score}
+                  </div>
+                </div>
+
+                {mlReport.metrics.filter(m => m.metric_name !== mlReport.primary_metric_name).slice(0, 2).map((m, idx) => (
+                  <div key={idx} style={{ background: 'var(--bg-surface)', padding: '0.65rem 0.85rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-subtle)' }}>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+                      {m.metric_name}
+                    </div>
+                    <div style={{ fontSize: '1.15rem', fontWeight: 700, color: m.is_improved ? 'var(--emerald-primary)' : 'var(--text-primary)', marginTop: '0.15rem' }}>
+                      {typeof m.cleaned_score === 'number' ? m.cleaned_score.toFixed(3) : m.cleaned_score}
+                      <span style={{ fontSize: '0.75rem', marginLeft: '0.4rem', fontWeight: 500, color: m.is_improved ? 'var(--emerald-primary)' : 'var(--text-muted)' }}>
+                        ({m.percent_change >= 0 ? '+' : ''}{m.percent_change.toFixed(1)}%)
+                      </span>
+                    </div>
+                    <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
+                      Raw baseline: {typeof m.raw_score === 'number' ? m.raw_score.toFixed(3) : m.raw_score}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Multi-Step Agentic Audit Trail Accordion */}
           <div>
             <div style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '0.6rem' }}>
@@ -2013,6 +2373,77 @@ export default function DataCleaningCenter({
               </div>
             )}
           </div>
+
+          {/* ML Readiness Summary in Instant Clean Results */}
+          {mlReport && mlReport.status === 'SUCCESS' && (
+            <div style={{
+              marginTop: '1rem',
+              paddingTop: '0.85rem',
+              borderTop: '1px solid var(--border-subtle)',
+              background: 'linear-gradient(135deg, rgba(6, 182, 212, 0.05), rgba(37, 99, 235, 0.05))',
+              borderRadius: 'var(--radius-sm)',
+              padding: '0.85rem 1rem',
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.65rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                  <Brain size={15} color="var(--cyan-primary, #06b6d4)" />
+                  <span style={{ fontWeight: 600, fontSize: '0.85rem', color: 'var(--text-primary)' }}>
+                    ML Task Readiness Benchmark ({mlReport.model_name})
+                  </span>
+                  <span className="badge badge-green" style={{ fontSize: '0.68rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                    <ShieldCheck size={11} /> 0% Leakage (80/20 Holdout)
+                  </span>
+                  {mlReport.target_inferred && (
+                    <span className="badge badge-muted" style={{ fontSize: '0.66rem' }}>
+                      Auto-Inferred Target: {mlReport.target_column}
+                    </span>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveMode('ml_evaluation')}
+                  className="btn btn-xs btn-ghost"
+                  style={{ fontSize: '0.72rem', color: 'var(--cyan-primary, #06b6d4)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
+                >
+                  <Activity size={12} /> View Full Evaluation Deep Dive &rarr;
+                </button>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.65rem' }}>
+                <div style={{ background: 'var(--bg-surface)', padding: '0.65rem 0.85rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-subtle)' }}>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+                    Headline: {mlReport.primary_metric_name}
+                  </div>
+                  <div style={{ fontSize: '1.25rem', fontWeight: 700, color: mlReport.primary_improved ? 'var(--emerald-primary)' : 'var(--text-primary)', marginTop: '0.15rem' }}>
+                    {typeof mlReport.primary_cleaned_score === 'number' ? mlReport.primary_cleaned_score.toFixed(3) : mlReport.primary_cleaned_score}
+                    <span style={{ fontSize: '0.75rem', marginLeft: '0.4rem', fontWeight: 500, color: mlReport.primary_improved ? 'var(--emerald-primary)' : '#f43f5e' }}>
+                      ({mlReport.primary_improvement_pct >= 0 ? '+' : ''}{mlReport.primary_improvement_pct.toFixed(1)}%)
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
+                    Raw baseline: {typeof mlReport.primary_raw_score === 'number' ? mlReport.primary_raw_score.toFixed(3) : mlReport.primary_raw_score}
+                  </div>
+                </div>
+
+                {mlReport.metrics.filter(m => m.metric_name !== mlReport.primary_metric_name).slice(0, 2).map((m, idx) => (
+                  <div key={idx} style={{ background: 'var(--bg-surface)', padding: '0.65rem 0.85rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-subtle)' }}>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+                      {m.metric_name}
+                    </div>
+                    <div style={{ fontSize: '1.15rem', fontWeight: 700, color: m.is_improved ? 'var(--emerald-primary)' : 'var(--text-primary)', marginTop: '0.15rem' }}>
+                      {typeof m.cleaned_score === 'number' ? m.cleaned_score.toFixed(3) : m.cleaned_score}
+                      <span style={{ fontSize: '0.75rem', marginLeft: '0.4rem', fontWeight: 500, color: m.is_improved ? 'var(--emerald-primary)' : 'var(--text-muted)' }}>
+                        ({m.percent_change >= 0 ? '+' : ''}{m.percent_change.toFixed(1)}%)
+                      </span>
+                    </div>
+                    <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
+                      Raw baseline: {typeof m.raw_score === 'number' ? m.raw_score.toFixed(3) : m.raw_score}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 

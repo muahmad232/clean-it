@@ -41,6 +41,7 @@ HIGH_RISK_ACTIONS = {
     "drop_constant_columns",
     "remove_outliers",
     "custom_polars_script",
+    "clarify_task_objective",
 }
 
 MEDIUM_RISK_ACTIONS = {
@@ -149,6 +150,49 @@ def resolve_user_approval(
 
     if decision_norm == "approve":
         updated_appr = update_approval_status(dataset_id, action_id, "APPROVED", feedback)
+        # If this approval is for task clarification, persist the confirmed task & target
+        if approval.get("action_type") == "clarify_task_objective":
+            new_task = None
+            new_target = None
+            if feedback:
+                try:
+                    import json
+                    fb_data = json.loads(feedback)
+                    if isinstance(fb_data, dict):
+                        new_task = fb_data.get("task_type")
+                        new_target = fb_data.get("target_column")
+                except Exception:
+                    pass
+                if not new_task:
+                    fb_upper = feedback.upper()
+                    if "REGRESS" in fb_upper:
+                        new_task = "REGRESSION"
+                    elif "CLASSIF" in fb_upper:
+                        new_task = "CLASSIFICATION"
+            params = approval.get("parameters") or {}
+            if not new_task:
+                new_task = params.get("suggested_task_type")
+            if not new_target:
+                new_target = params.get("suggested_target_column")
+            if not new_target and approval.get("target_columns"):
+                new_target = approval["target_columns"][0]
+
+            up_meta: dict[str, Any] = {}
+            if new_task:
+                from app.agent.evaluator import normalize_db_task_type
+                norm_t = normalize_db_task_type(new_task)
+                up_meta["task_type"] = norm_t
+                dataset["task_type"] = norm_t
+            if new_target:
+                up_meta["target_column"] = new_target
+                dataset["target_column"] = new_target
+
+            if up_meta:
+                try:
+                    client = get_service_client()
+                    client.schema("data_agent").table("datasets").update(up_meta).eq("id", dataset_id).execute()
+                except Exception as exc:
+                    logger.warning(f"Could not persist clarified task/target to dataset: {exc}")
     elif decision_norm == "reject":
         updated_appr = update_approval_status(dataset_id, action_id, "REJECTED", feedback)
     else:
@@ -335,6 +379,34 @@ def resolve_user_approval(
             update_dataset_profile(dataset_id, profile_json)
         except Exception as exc:
             logger.warning(f"Could not compute comparison for approved action: {exc}")
+
+        # ML Evaluation benchmark on approved and cleaned version
+        try:
+            from app.routers.clean import _evaluate_ml_safely
+            orig_path = dataset.get("storage_path")
+            orig_bytes = download_file(orig_path) if orig_path else raw_bytes
+            eval_target = target_col or dataset.get("target_column")
+            eval_task = dataset.get("task_type", "GENERAL")
+            ml_eval_report = _evaluate_ml_safely(
+                raw_bytes=orig_bytes,
+                cleaned_bytes=cleaned_bytes,
+                target_column=eval_target,
+                task_type=eval_task,
+            )
+            if ml_eval_report:
+                profile_json["ml_evaluation"] = ml_eval_report
+                final_profile["ml_evaluation"] = ml_eval_report
+                if not eval_target and ml_eval_report.get("target_column"):
+                    eval_target = ml_eval_report["target_column"]
+                    dataset["target_column"] = eval_target
+                    try:
+                        client = get_service_client()
+                        client.schema("data_agent").table("datasets").update({"target_column": eval_target}).eq("id", dataset_id).execute()
+                    except Exception:
+                        pass
+                update_dataset_profile(dataset_id, profile_json)
+        except Exception as exc:
+            logger.warning(f"Could not compute ML evaluation in approvals: {exc}")
 
         dataset_status = "CLEANED" if dataset_status != "ROLLED_BACK" else "ROLLED_BACK"
         if dataset_status != "ROLLED_BACK":

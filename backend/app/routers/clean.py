@@ -38,8 +38,6 @@ def _evaluate_ml_safely(
     task_type: Optional[str],
 ) -> Optional[dict]:
     """Helper to benchmark ML performance without raising if evaluation fails or is not applicable."""
-    if not target_column:
-        return None
     task_str = (task_type or "").upper()
     if not any(k in task_str for k in ("REGRESS", "CLASSIF", "LOGISTIC")):
         return None
@@ -205,6 +203,13 @@ def clean_project_dataset(
     ml_eval_report = _evaluate_ml_safely(raw_bytes, cleaned_bytes, effective_target, effective_task)
     if ml_eval_report:
         profile_json["ml_evaluation"] = ml_eval_report
+        if not effective_target and ml_eval_report.get("target_column"):
+            effective_target = ml_eval_report["target_column"]
+            try:
+                client = get_service_client()
+                client.schema("data_agent").table("datasets").update({"target_column": effective_target}).eq("id", dataset_id).execute()
+            except Exception:
+                pass
         try:
             update_dataset_profile(dataset_id, profile_json)
         except Exception:
@@ -474,6 +479,13 @@ def clean_project_dataset_agentic(
     if ml_eval_report:
         profile_json["ml_evaluation"] = ml_eval_report
         final_profile["ml_evaluation"] = ml_eval_report
+        if not effective_target and ml_eval_report.get("target_column"):
+            effective_target = ml_eval_report["target_column"]
+            try:
+                client = get_service_client()
+                client.schema("data_agent").table("datasets").update({"target_column": effective_target}).eq("id", dataset_id).execute()
+            except Exception:
+                pass
         try:
             update_dataset_profile(dataset_id, profile_json)
         except Exception:
@@ -713,6 +725,13 @@ def clean_project_dataset_self_heal(
     if ml_eval_report:
         profile_json["ml_evaluation"] = ml_eval_report
         final_profile["ml_evaluation"] = ml_eval_report
+        if not effective_target and ml_eval_report.get("target_column"):
+            effective_target = ml_eval_report["target_column"]
+            try:
+                client = get_service_client()
+                client.schema("data_agent").table("datasets").update({"target_column": effective_target}).eq("id", dataset_id).execute()
+            except Exception:
+                pass
         try:
             update_dataset_profile(dataset_id, profile_json)
         except Exception:
@@ -969,6 +988,13 @@ def clean_project_dataset_chat(
     if ml_eval_report:
         profile_json["ml_evaluation"] = ml_eval_report
         final_profile["ml_evaluation"] = ml_eval_report
+        if not effective_target and ml_eval_report.get("target_column"):
+            effective_target = ml_eval_report["target_column"]
+            try:
+                client_db = get_service_client()
+                client_db.schema("data_agent").table("datasets").update({"target_column": effective_target}).eq("id", dataset_id).execute()
+            except Exception:
+                pass
         try:
             update_dataset_profile(dataset_id, profile_json)
         except Exception:

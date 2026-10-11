@@ -48,6 +48,7 @@ class MLEvaluationReport(BaseModel):
     leakage_guard_notice: str = Field(
         default="Evaluated on 20% held-out test set strictly isolated before cleaning to prevent target leakage."
     )
+    target_inferred: bool = Field(default=False, description="Whether target column was auto-inferred")
 
 
 class MLEvaluationRequest(BaseModel):

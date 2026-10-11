@@ -168,6 +168,13 @@ class SelfHealingOrchestrator:
                 "- Only select transformations that directly address active detected defects or user requirements.\n"
                 "- Protect the target column if specified; NEVER drop or distort target label distribution.\n"
                 "- If all major defects are solved and user instructions fulfilled, set is_dataset_clean=True with empty actions.\n"
+                "- TASK CLARIFICATION RULE: If the target task is 'GENERAL' or unspecified and user requirements do not clearly define a downstream task, BUT you detect candidate target columns that strongly imply supervised learning (e.g. price/churn/target/label/sales/status), OR if target_column is not specified and multiple columns could be target variables:\n"
+                "  You SHOULD ask the user for clarification before applying heavy task-specific transformations!\n"
+                "  Set task_clarification_needed = True\n"
+                "  Set clarification_question = 'What machine learning task and target column is this dataset being prepared for?'\n"
+                "  Suggest suggested_task_type (e.g. 'REGRESSION' or 'CLASSIFICATION')\n"
+                "  Suggest candidate suggested_target_column (e.g. 'price' or 'churn')\n"
+                "  Provide 2 to 4 suggested_options (e.g. ['Predict Price (Regression)', 'Predict Churn (Classification)', 'Universal General Cleaning'])\n"
             )
 
             # Inject Regression Alert if previous action failed
@@ -217,6 +224,59 @@ class SelfHealingOrchestrator:
                     f"LLM call failed in iteration {iteration} ({exc}). Using deterministic fallback."
                 )
                 decision = _create_fallback_decision(current_issues, current_shape, total_null_pct)
+
+            # Check if LLM requested task clarification
+            if decision.task_clarification_needed and (iteration == 1 or not target_column or task_type == "GENERAL"):
+                logger.info(
+                    f"Agent requested task clarification at iteration {iteration}: {decision.clarification_question}"
+                )
+                clarify_action = CleaningActionPlan(
+                    action_type="clarify_task_objective",
+                    target_columns=[decision.suggested_target_column] if decision.suggested_target_column else [],
+                    parameters={
+                        "clarification_question": decision.clarification_question or "What downstream task and target column is this dataset being prepared for?",
+                        "suggested_task_type": decision.suggested_task_type or "REGRESSION",
+                        "suggested_target_column": decision.suggested_target_column or "",
+                        "suggested_options": decision.suggested_options or ["Regression", "Classification", "General Cleaning"],
+                    },
+                    reasoning=decision.clarification_question or "Task objective is ambiguous; user clarification requested.",
+                )
+                appr_rec = register_pending_approval(
+                    dataset_id=dataset_id,
+                    project_id=project_id,
+                    action=clarify_action,
+                    confidence=0.99,
+                    rows_affected_est=0,
+                )
+                step_record = IterationStepReport(
+                    iteration=iteration,
+                    pre_shape=current_shape,
+                    pre_quality_score=working_score,
+                    issues_before_count=len(current_issues),
+                    pre_issues_count=len(current_issues),
+                    health_grade=decision.current_health_grade,
+                    readiness_score=decision.readiness_score,
+                    llm_assessment=decision.assessment,
+                    is_dataset_clean=False,
+                    stopping_reason=f"Paused for user task clarification: {decision.clarification_question}",
+                    selected_actions=[clarify_action.model_dump()],
+                    executed_actions=[],
+                    execution_results=[],
+                    post_shape=current_shape,
+                    post_quality_score=working_score,
+                    quality_delta=0.0,
+                    regression_detected=False,
+                    rolled_back=False,
+                    waiting_approval=True,
+                    pending_approvals=[appr_rec],
+                    pending_safe_actions=[],
+                    status="WAITING_APPROVAL",
+                )
+                steps.append(step_record)
+                all_pending_approvals.append(appr_rec)
+                termination_reason = f"Paused for user clarification: {decision.clarification_question}"
+                effective_status = "WAITING_APPROVAL"
+                break
 
             # Check if LLM considers dataset clean
             if decision.is_dataset_clean or not decision.selected_actions:

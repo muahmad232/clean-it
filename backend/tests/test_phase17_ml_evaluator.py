@@ -363,3 +363,45 @@ def test_api_get_cached_evaluation(mock_get_ds):
     assert data["status"] == "SUCCESS"
     assert data["primary_metric_name"] == "R² Score"
     assert data["primary_cleaned_score"] == 0.88
+
+
+def test_infer_target_column_heuristics():
+    """Test infer_target_column accurately identifies candidate regression and classification targets."""
+    from app.agent.evaluator import infer_target_column
+
+    # Regression case
+    df_reg = pl.DataFrame({
+        "user_id": [f"ID_{i}" for i in range(50)],
+        "square_feet": [1000 + i * 20 for i in range(50)],
+        "saleprice": [200000.0 + i * 5000 for i in range(50)],
+    })
+    inferred_reg = infer_target_column(df_reg, "REGRESSION")
+    assert inferred_reg == "saleprice"
+
+    # Classification case
+    df_clf = pl.DataFrame({
+        "customer_id": [f"C_{i}" for i in range(50)],
+        "tenure_months": [i for i in range(50)],
+        "churn": [1 if i % 2 == 0 else 0 for i in range(50)],
+    })
+    inferred_clf = infer_target_column(df_clf, "CLASSIFICATION")
+    assert inferred_clf == "churn"
+
+
+def test_auto_infer_target_in_benchmark():
+    """Test evaluate_dataset_ml_benchmark auto-infers target and succeeds when target_column is None."""
+    raw_df, cleaned_df = generate_regression_dfs()
+
+    # Pass target_column=None
+    report = evaluate_ml_holdout(
+        raw_df=raw_df,
+        cleaned_df=cleaned_df,
+        task_type="REGRESSION",
+        target_column=None,
+    )
+
+    assert report.status == "SUCCESS"
+    assert report.target_inferred is True
+    assert report.target_column == "target_price"
+    assert report.primary_metric_name == "R² Score"
+

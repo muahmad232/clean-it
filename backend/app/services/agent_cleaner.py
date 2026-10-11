@@ -75,6 +75,26 @@ class AgentIterationDecision(BaseModel):
         default_factory=list,
         description="Ordered list of cleaning actions to execute in this iteration",
     )
+    task_clarification_needed: bool = Field(
+        default=False,
+        description="Set to True if the intended ML task type or target variable is ambiguous/unknown and user input is needed to optimize the dataset properly.",
+    )
+    clarification_question: Optional[str] = Field(
+        default=None,
+        description="Specific question to ask the user regarding what task or target column the dataset is being prepared for.",
+    )
+    suggested_task_type: Optional[str] = Field(
+        default=None,
+        description="Suggested ML task based on dataset characteristics (e.g. 'REGRESSION', 'CLASSIFICATION', 'CONTINUOUS_REGRESSION', 'LINEAR_REGRESSION', 'GENERAL')",
+    )
+    suggested_target_column: Optional[str] = Field(
+        default=None,
+        description="Candidate target column inferred from dataset features (e.g. 'churn', 'price', 'label', 'target')",
+    )
+    suggested_options: List[str] = Field(
+        default_factory=list,
+        description="Quick-select options or suggestions for the user to answer with",
+    )
 
 
 CleaningActionPlan.model_rebuild()
@@ -294,6 +314,10 @@ def apply_cleaning_action(
                     result["columns_delta"] = after_c - before_cols
                     result["details"] = f"Executed dynamic Polars script successfully ({before_rows}x{before_cols} -> {after_r}x{after_c})."
                     df = new_df
+
+        elif action_type == "clarify_task_objective":
+            q = params.get("clarification_question") or action.reasoning
+            result["details"] = f"Clarified task objective: {q}"
 
         else:
             result["details"] = f"Unrecognized action '{action_type}'; skipped safely."

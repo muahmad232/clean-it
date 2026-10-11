@@ -7,9 +7,16 @@ import {
   FileCheck,
   ShieldCheck,
   Filter,
-  Check
+  Check,
+  Brain,
+  TrendingUp,
+  TrendingDown,
+  Target,
+  Activity,
+  RefreshCw,
+  AlertTriangle,
 } from 'lucide-react'
-import { cleanDataset, getDownloadUrl } from '../api'
+import { cleanDataset, getDownloadUrl, evaluateDatasetMl } from '../api'
 
 export default function CleanActionCard({
   dataset,
@@ -26,6 +33,11 @@ export default function CleanActionCard({
   )
   const [error, setError] = useState(null)
   const [lastCleanedAt, setLastCleanedAt] = useState(null)
+  const [mlReport, setMlReport] = useState(
+    profile?.ml_evaluation || dataset?.profile_json?.ml_evaluation || null
+  )
+  const [mlLoading, setMlLoading] = useState(false)
+  const [mlError, setMlError] = useState(null)
 
   const columns = profile?.columns?.map(c => c.name) || []
 
@@ -42,6 +54,12 @@ export default function CleanActionCard({
       )
       setCleaningReport(res.report)
       setLastCleanedAt(new Date().toLocaleTimeString())
+      if (res.ml_evaluation) {
+        setMlReport(res.ml_evaluation)
+      }
+      if (res.target_column && !targetColumn) {
+        setTargetColumn(res.target_column)
+      }
       if (onCleanSuccess) {
         onCleanSuccess(res)
       }
@@ -50,6 +68,33 @@ export default function CleanActionCard({
       setError(err.message || 'Cleaning execution failed.')
     } finally {
       setIsCleaning(false)
+    }
+  }
+
+  const handleRunMlBenchmark = async () => {
+    if (!dataset?.id) return
+    setMlLoading(true)
+    setMlError(null)
+    try {
+      const res = await evaluateDatasetMl(
+        projectId || dataset.project_id,
+        dataset.id,
+        {
+          targetColumn: targetColumn.trim() || null,
+          taskType: taskType,
+          testSize: 0.20,
+          randomState: 42,
+        }
+      )
+      setMlReport(res)
+      if (res?.target_column && !targetColumn) {
+        setTargetColumn(res.target_column)
+      }
+    } catch (err) {
+      console.error('ML benchmark failed:', err)
+      setMlError(err.message || 'ML benchmark failed.')
+    } finally {
+      setMlLoading(false)
     }
   }
 
@@ -360,6 +405,155 @@ export default function CleanActionCard({
               </div>
             )}
           </div>
+
+          {/* ML Evaluation & Task Readiness Card */}
+          {mlReport && mlReport.status === 'SUCCESS' && (
+            <div style={{
+              background: 'linear-gradient(135deg, rgba(6, 182, 212, 0.05), rgba(37, 99, 235, 0.05))',
+              border: '1px solid rgba(6, 182, 212, 0.3)',
+              borderRadius: 'var(--radius-sm)',
+              padding: '1.1rem 1.25rem',
+              marginBottom: '1.25rem',
+            }}>
+              {/* Header */}
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '0.65rem',
+                marginBottom: '0.85rem',
+                paddingBottom: '0.65rem',
+                borderBottom: '1px solid rgba(6, 182, 212, 0.2)',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <Brain size={18} color="var(--cyan-primary, #06b6d4)" />
+                  <div>
+                    <h4 style={{ fontSize: '0.925rem', fontWeight: 600, color: 'var(--text-primary)', margin: 0 }}>
+                      ML Task Readiness Benchmark ({mlReport.model_name})
+                    </h4>
+                    <span style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
+                      Target: <strong style={{ color: 'var(--text-primary)' }}>{mlReport.target_column}</strong>
+                      {mlReport.target_inferred ? ' (Auto-Inferred)' : ''} &bull; {mlReport.train_samples} train / {mlReport.test_samples} test rows (80/20 holdout)
+                    </span>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <span className="badge badge-green" style={{ fontSize: '0.7rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                    <ShieldCheck size={12} /> 0% Leakage Guard
+                  </span>
+                  <button
+                    onClick={handleRunMlBenchmark}
+                    disabled={mlLoading}
+                    className="btn btn-xs btn-ghost"
+                    style={{ fontSize: '0.72rem', color: 'var(--cyan-primary, #06b6d4)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
+                  >
+                    {mlLoading ? <Loader2 size={11} className="spin" /> : <RefreshCw size={11} />}
+                    {mlLoading ? 'Evaluating...' : 'Re-Benchmark'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Metric Comparison Grid */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                gap: '0.65rem',
+                marginBottom: '0.85rem',
+              }}>
+                {/* Headline Metric */}
+                <div style={{ background: 'var(--bg-surface)', padding: '0.75rem 0.9rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-subtle)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>
+                      {mlReport.primary_metric_name}
+                    </span>
+                    <span
+                      className={`badge ${mlReport.primary_improved ? 'badge-green' : 'badge-rose'}`}
+                      style={{ fontSize: '0.66rem', display: 'flex', alignItems: 'center', gap: '0.2rem' }}
+                    >
+                      {mlReport.primary_improved ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
+                      {mlReport.primary_improvement_pct >= 0 ? `+${mlReport.primary_improvement_pct.toFixed(1)}%` : `${mlReport.primary_improvement_pct.toFixed(1)}%`}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '1.35rem', fontWeight: 700, color: mlReport.primary_improved ? 'var(--emerald-primary)' : 'var(--text-primary)', marginTop: '0.2rem' }}>
+                    {typeof mlReport.primary_cleaned_score === 'number' ? mlReport.primary_cleaned_score.toFixed(3) : mlReport.primary_cleaned_score}
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
+                    Raw baseline: <span style={{ textDecoration: 'line-through', opacity: 0.7 }}>{typeof mlReport.primary_raw_score === 'number' ? mlReport.primary_raw_score.toFixed(3) : mlReport.primary_raw_score}</span>
+                  </div>
+                </div>
+
+                {/* Secondary Metrics */}
+                {mlReport.metrics.filter(m => m.metric_name !== mlReport.primary_metric_name).slice(0, 2).map((m, idx) => (
+                  <div key={idx} style={{ background: 'var(--bg-surface)', padding: '0.75rem 0.9rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-subtle)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>
+                        {m.metric_name}
+                      </span>
+                      <span
+                        className={`badge ${m.is_improved ? 'badge-green' : 'badge-muted'}`}
+                        style={{ fontSize: '0.66rem', display: 'flex', alignItems: 'center', gap: '0.2rem' }}
+                      >
+                        {m.is_improved ? <TrendingUp size={10} /> : null}
+                        {m.percent_change >= 0 ? `+${m.percent_change.toFixed(1)}%` : `${m.percent_change.toFixed(1)}%`}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: '1.25rem', fontWeight: 700, color: m.is_improved ? 'var(--emerald-primary)' : 'var(--text-primary)', marginTop: '0.2rem' }}>
+                      {typeof m.cleaned_score === 'number' ? m.cleaned_score.toFixed(3) : m.cleaned_score}
+                    </div>
+                    <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
+                      Raw baseline: <span style={{ textDecoration: 'line-through', opacity: 0.7 }}>{typeof m.raw_score === 'number' ? m.raw_score.toFixed(3) : m.raw_score}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Top Predictive Features */}
+              {mlReport.top_features && mlReport.top_features.length > 0 && (
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <span style={{ color: 'var(--text-muted)', fontWeight: 500 }}>Top Predictive Features:</span>
+                  {mlReport.top_features.slice(0, 4).map((f, idx) => (
+                    <span key={idx} className="badge badge-muted" style={{ fontFamily: 'var(--font-mono)', fontSize: '0.7rem' }}>
+                      {f.feature}: {Math.round(f.importance * 100)}%
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Prompt to benchmark if not yet evaluated for supervised task */}
+          {!mlReport && !mlLoading && (['REGRESSION', 'LINEAR_REGRESSION', 'CONTINUOUS_REGRESSION', 'POLYNOMIAL_REGRESSION', 'CLASSIFICATION', 'BINARY_CLASSIFICATION', 'MULTICLASS_CLASSIFICATION', 'LOGISTIC_REGRESSION'].includes(taskType)) && (
+            <div style={{
+              background: 'var(--bg-subtle)',
+              border: '1px dashed var(--border-medium)',
+              borderRadius: 'var(--radius-sm)',
+              padding: '0.75rem 1rem',
+              marginBottom: '1.25rem',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: '0.5rem',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                <Brain size={15} color="var(--cyan-primary, #06b6d4)" />
+                <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                  Ready to test ML readiness for <strong>{taskType}</strong> with zero target leakage.
+                </span>
+              </div>
+              <button
+                onClick={handleRunMlBenchmark}
+                disabled={mlLoading}
+                className="btn btn-xs btn-outline"
+                style={{ fontSize: '0.72rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
+              >
+                {mlLoading ? <Loader2 size={11} className="spin" /> : <Brain size={11} />}
+                Benchmark ML Readiness
+              </button>
+            </div>
+          )}
 
           {/* Download Action Strip */}
           <div style={{
