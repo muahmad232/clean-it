@@ -75,6 +75,7 @@ export default function StudioPage({
   const [showNewProjectModal, setShowNewProjectModal] = useState(false)
   const [newProjectName, setNewProjectName] = useState('')
   const [creatingProject, setCreatingProject] = useState(false)
+  const [activeStudioTab, setActiveStudioTab] = useState('cleaning') // 'cleaning' | 'issues' | 'columns' | 'summary' | 'all'
 
   const handleQuickLoad = async (sample) => {
     setLoadingSample(sample.name)
@@ -291,24 +292,105 @@ export default function StudioPage({
           {/* 1. Summary KPI Metrics */}
           <ProfileStats profile={profileData} issues={issuesData} />
 
-          {/* 2. Unified Data Cleaning Center (Autonomous AI Loop + Instant Deterministic + Diagnostics) */}
-          <DataCleaningCenter
-            dataset={activeDataset}
-            projectId={activeDataset?.project_id || project?.id}
-            profile={profileData}
-            issues={issuesData}
-            taskType={activeDataset?.task_type || 'GENERAL'}
-            onDatasetCleaned={onDatasetCleaned}
-          />
+          {/* Studio Navigation Bar */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '0.5rem',
+            marginBottom: '1.25rem',
+            background: 'var(--bg-main)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: 'var(--radius-sm)',
+            padding: '0.35rem 0.5rem',
+          }}>
+            <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={() => setActiveStudioTab('cleaning')}
+                className={`btn btn-xs ${activeStudioTab === 'cleaning' ? 'btn-primary' : 'btn-ghost'}`}
+                style={{ fontSize: '0.78rem', padding: '0.3rem 0.75rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
+              >
+                <Sparkles size={13} />
+                Cleaning & ML Studio
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveStudioTab('issues')}
+                className={`btn btn-xs ${activeStudioTab === 'issues' ? 'btn-primary' : 'btn-ghost'}`}
+                style={{ fontSize: '0.78rem', padding: '0.3rem 0.75rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
+              >
+                <ShieldAlert size={13} />
+                Defect Issues
+                {issuesData && issuesData.length > 0 && (
+                  <span className="badge badge-amber" style={{ fontSize: '0.65rem', padding: '0.05rem 0.35rem' }}>
+                    {issuesData.length}
+                  </span>
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveStudioTab('columns')}
+                className={`btn btn-xs ${activeStudioTab === 'columns' ? 'btn-primary' : 'btn-ghost'}`}
+                style={{ fontSize: '0.78rem', padding: '0.3rem 0.75rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
+              >
+                <Table size={13} />
+                Columns & Schema
+                {profileData.columns && (
+                  <span className="badge badge-muted" style={{ fontSize: '0.65rem', padding: '0.05rem 0.35rem' }}>
+                    {profileData.columns.length}
+                  </span>
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveStudioTab('summary')}
+                className={`btn btn-xs ${activeStudioTab === 'summary' ? 'btn-primary' : 'btn-ghost'}`}
+                style={{ fontSize: '0.78rem', padding: '0.3rem 0.75rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
+              >
+                <CheckCircle2 size={13} />
+                AI Summary
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setActiveStudioTab(activeStudioTab === 'all' ? 'cleaning' : 'all')}
+              className={`btn btn-xs ${activeStudioTab === 'all' ? 'btn-secondary' : 'btn-ghost'}`}
+              style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}
+              title="Toggle between focused tab view and all stacked sections"
+            >
+              {activeStudioTab === 'all' ? 'Show Focused View' : 'View All Sections (Stacked)'}
+            </button>
+          </div>
+
+          {/* 2. Unified Data Cleaning Center (Autonomous AI Loop + Instant Deterministic + Diagnostics + ML Benchmark) */}
+          {(activeStudioTab === 'cleaning' || activeStudioTab === 'all') && (
+            <DataCleaningCenter
+              dataset={activeDataset}
+              projectId={activeDataset?.project_id || project?.id}
+              profile={profileData}
+              issues={issuesData}
+              taskType={activeDataset?.task_type || 'GENERAL'}
+              onDatasetCleaned={onDatasetCleaned}
+            />
+          )}
 
           {/* 3. Detailed Quality Issues Detected */}
-          <IssuesList issues={issuesData} />
+          {(activeStudioTab === 'issues' || activeStudioTab === 'all') && (
+            <IssuesList issues={issuesData} />
+          )}
 
           {/* 4. Column Schema Explorer */}
-          <ColumnsExplorer columns={profileData.columns || []} />
+          {(activeStudioTab === 'columns' || activeStudioTab === 'all') && (
+            <ColumnsExplorer columns={profileData.columns || []} />
+          )}
 
           {/* 5. Telemetry & Context */}
-          <LlmSummaryCard summary={profileData.llm_summary} />
+          {(activeStudioTab === 'summary' || activeStudioTab === 'all') && (
+            <LlmSummaryCard summary={profileData.llm_summary} />
+          )}
         </div>
       )}
 

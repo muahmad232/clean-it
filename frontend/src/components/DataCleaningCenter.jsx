@@ -698,6 +698,90 @@ export default function DataCleaningCenter({
     }
   }
 
+  const renderTaskSelector = (disabled = false) => (
+    <select
+      value={selectedTask}
+      onChange={(e) => setSelectedTask(e.target.value)}
+      disabled={disabled || isAnyCleaningActive}
+      className="select-input"
+      style={{
+        width: '100%',
+        background: 'var(--bg-surface)',
+        border: '1px solid var(--border-medium)',
+        color: 'var(--text-primary)',
+        borderRadius: 'var(--radius-sm)',
+        padding: '0.35rem 0.6rem',
+        fontSize: '0.8rem',
+        outline: 'none',
+        cursor: 'pointer',
+      }}
+    >
+      <optgroup label="General & Unsupervised">
+        <option value="GENERAL">General Clean (Universal)</option>
+        <option value="CLUSTERING">Clustering (Drop High Nulls & Constant)</option>
+        <option value="LLM_FINETUNING">LLM Fine-tuning (Whitespace & Formatting)</option>
+        <option value="TIME_SERIES">Time Series / Forecasting</option>
+      </optgroup>
+      <optgroup label="Regression Tasks (Numeric Targets)">
+        <option value="REGRESSION">Regression (General)</option>
+        <option value="LINEAR_REGRESSION">Linear Regression (Scale & Outliers)</option>
+        <option value="CONTINUOUS_REGRESSION">Continuous Regression (Target Impute)</option>
+        <option value="POLYNOMIAL_REGRESSION">Polynomial Regression (Feature Curves)</option>
+      </optgroup>
+      <optgroup label="Classification Tasks (Categorical / Discrete Targets)">
+        <option value="CLASSIFICATION">Classification (General)</option>
+        <option value="BINARY_CLASSIFICATION">Binary Classification (0/1 Balanced)</option>
+        <option value="MULTICLASS_CLASSIFICATION">Multi-Class Classification</option>
+        <option value="LOGISTIC_REGRESSION">Logistic Regression (Clean & Encode)</option>
+      </optgroup>
+    </select>
+  )
+
+  const renderTargetColumnSelector = (disabled = false, placeholder = 'e.g. Survived, Churn') => (
+    columns.length > 0 ? (
+      <select
+        value={targetColumn}
+        onChange={(e) => setTargetColumn(e.target.value)}
+        disabled={disabled || isAnyCleaningActive}
+        className="select-input"
+        style={{
+          width: '100%',
+          background: 'var(--bg-surface)',
+          border: '1px solid var(--border-medium)',
+          color: 'var(--text-primary)',
+          borderRadius: 'var(--radius-sm)',
+          padding: '0.35rem 0.6rem',
+          fontSize: '0.8rem',
+          outline: 'none',
+          cursor: 'pointer',
+        }}
+      >
+        <option value="">-- None (Protect All) --</option>
+        {columns.map((c) => (
+          <option key={c} value={c}>{c}</option>
+        ))}
+      </select>
+    ) : (
+      <input
+        type="text"
+        placeholder={placeholder}
+        value={targetColumn}
+        onChange={(e) => setTargetColumn(e.target.value)}
+        disabled={disabled || isAnyCleaningActive}
+        style={{
+          width: '100%',
+          background: 'var(--bg-surface)',
+          border: '1px solid var(--border-medium)',
+          color: 'var(--text-primary)',
+          borderRadius: 'var(--radius-sm)',
+          padding: '0.35rem 0.6rem',
+          fontSize: '0.8rem',
+          outline: 'none',
+        }}
+      />
+    )
+  )
+
   return (
     <div className="card" style={{ padding: '1.25rem', marginBottom: '1.5rem', border: '1px solid var(--border-medium)' }}>
       {/* ── Section Header ───────────────────────────────────────── */}
@@ -874,432 +958,274 @@ export default function DataCleaningCenter({
         </div>
       </div>
 
-      {/* ── Configuration Parameters Grid ─────────────────────────── */}
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-        gap: '0.75rem',
-        background: 'var(--bg-main)',
-        border: '1px solid var(--border-subtle)',
-        borderRadius: 'var(--radius-sm)',
-        padding: '0.85rem 1rem',
-        marginBottom: '1rem',
-        alignItems: 'end',
-      }}>
-        {/* ML Task Selector */}
-        <div>
-          <label style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '0.3rem', fontWeight: 500 }}>
-            Target Optimization Task
-          </label>
-          <select
-            value={selectedTask}
-            onChange={(e) => setSelectedTask(e.target.value)}
-            disabled={isAnyCleaningActive}
-            className="select-input"
-            style={{
-              width: '100%',
-              background: 'var(--bg-surface)',
-              border: '1px solid var(--border-medium)',
-              color: 'var(--text-primary)',
-              borderRadius: 'var(--radius-sm)',
-              padding: '0.35rem 0.6rem',
-              fontSize: '0.8rem',
-              outline: 'none',
-              cursor: 'pointer',
-            }}
-          >
-            <optgroup label="General & Unsupervised">
-              <option value="GENERAL">General Clean (Universal)</option>
-              <option value="CLUSTERING">Clustering (Drop High Nulls & Constant)</option>
-              <option value="LLM_FINETUNING">LLM Fine-tuning (Whitespace & Formatting)</option>
-              <option value="TIME_SERIES">Time Series / Forecasting</option>
-            </optgroup>
-            <optgroup label="Regression Tasks (Numeric Targets)">
-              <option value="REGRESSION">Regression (General)</option>
-              <option value="LINEAR_REGRESSION">Linear Regression (Scale & Outliers)</option>
-              <option value="CONTINUOUS_REGRESSION">Continuous Regression (Target Impute)</option>
-              <option value="POLYNOMIAL_REGRESSION">Polynomial Regression (Feature Curves)</option>
-            </optgroup>
-            <optgroup label="Classification Tasks (Categorical / Discrete Targets)">
-              <option value="CLASSIFICATION">Classification (General)</option>
-              <option value="BINARY_CLASSIFICATION">Binary Classification (0/1 Balanced)</option>
-              <option value="MULTICLASS_CLASSIFICATION">Multi-Class Classification</option>
-              <option value="LOGISTIC_REGRESSION">Logistic Regression (Clean & Encode)</option>
-            </optgroup>
-          </select>
-        </div>
-
-        {/* Target Column (Protected from drop) */}
-        <div>
-          <label style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '0.3rem', fontWeight: 500 }}>
-            Protected Target Column
-          </label>
-          {columns.length > 0 ? (
-            <select
-              value={targetColumn}
-              onChange={(e) => setTargetColumn(e.target.value)}
-              disabled={isAnyCleaningActive}
-              className="select-input"
-              style={{
-                width: '100%',
-                background: 'var(--bg-surface)',
-                border: '1px solid var(--border-medium)',
-                color: 'var(--text-primary)',
-                borderRadius: 'var(--radius-sm)',
-                padding: '0.35rem 0.6rem',
-                fontSize: '0.8rem',
-                outline: 'none',
-                cursor: 'pointer',
-              }}
-            >
-              <option value="">-- None (Protect All) --</option>
-              {columns.map((c) => (
-                <option key={c} value={c}>{c}</option>
-              ))}
-            </select>
-          ) : (
-            <input
-              type="text"
-              placeholder="e.g. Survived, Churn"
-              value={targetColumn}
-              onChange={(e) => setTargetColumn(e.target.value)}
-              disabled={isAnyCleaningActive}
-              style={{
-                width: '100%',
-                background: 'var(--bg-surface)',
-                border: '1px solid var(--border-medium)',
-                color: 'var(--text-primary)',
-                borderRadius: 'var(--radius-sm)',
-                padding: '0.35rem 0.6rem',
-                fontSize: '0.8rem',
-                outline: 'none',
-              }}
-            />
-          )}
-        </div>
-
-        {/* AI Loop Iterations (Only visible in agent_loop mode) */}
-        {activeMode === 'agent_loop' && (
-          <div>
-            <label style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '0.3rem', fontWeight: 500 }}>
-              Max Agent Iterations
-            </label>
-            <select
-              value={maxIterations}
-              onChange={(e) => setMaxIterations(Number(e.target.value))}
-              disabled={isAnyCleaningActive}
-              className="select-input"
-              style={{
-                width: '100%',
-                background: 'var(--bg-surface)',
-                border: '1px solid var(--border-medium)',
-                color: 'var(--text-primary)',
-                borderRadius: 'var(--radius-sm)',
-                padding: '0.35rem 0.6rem',
-                fontSize: '0.8rem',
-                outline: 'none',
-                cursor: 'pointer',
-              }}
-            >
-              <option value={2}>2 Iterations</option>
-              <option value={3}>3 Iterations (Recommended)</option>
-              <option value={4}>4 Iterations</option>
-              <option value={5}>5 Iterations (Deep Cleanup)</option>
-            </select>
-          </div>
-        )}
-
-        {/* Phase 12: High-Risk Action Guard Toggle (Only in agent_loop mode) */}
-        {activeMode === 'agent_loop' && (
-          <div>
-            <label style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '0.3rem', fontWeight: 500 }}>
-              Safety & Approval Guard
-            </label>
-            <button
-              type="button"
-              onClick={() => setRequireApproval(!requireApproval)}
-              disabled={isAnyCleaningActive}
-              className="btn btn-ghost"
-              style={{
-                width: '100%',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                background: requireApproval ? 'rgba(245, 158, 11, 0.08)' : 'var(--bg-surface)',
-                border: requireApproval ? '1px solid rgba(245, 158, 11, 0.45)' : '1px solid var(--border-medium)',
-                borderRadius: 'var(--radius-sm)',
-                padding: '0.35rem 0.6rem',
-                fontSize: '0.78rem',
-                color: requireApproval ? '#f59e0b' : 'var(--text-muted)',
-                cursor: 'pointer',
-                height: '34px',
-              }}
-              title="When enabled, high-risk actions (column drops, outlier removal) pause the agent and await human approval"
-            >
-              <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                <ShieldAlert size={13} color={requireApproval ? '#f59e0b' : 'var(--text-muted)'} />
-                {requireApproval ? 'Gate High Risk' : 'Full Autopilot'}
-              </span>
-              <span
-                className={`badge ${requireApproval ? 'badge-amber' : 'badge-muted'}`}
-                style={{ fontSize: '0.65rem', padding: '0.1rem 0.35rem' }}
-              >
-                {requireApproval ? 'ON' : 'OFF'}
-              </span>
-            </button>
-          </div>
-        )}
-
-        {/* Phase 14: Autonomous Self-Healing Guardrail Toggle (Only in agent_loop mode) */}
-        {activeMode === 'agent_loop' && (
-          <div>
-            <label style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '0.3rem', fontWeight: 500 }}>
-              Self-Healing Loop (Phase 14)
-            </label>
-            <button
-              type="button"
-              onClick={() => setSelfHealingMode(!selfHealingMode)}
-              disabled={isAnyCleaningActive}
-              className="btn btn-ghost"
-              style={{
-                width: '100%',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                background: selfHealingMode ? 'rgba(16, 185, 129, 0.08)' : 'var(--bg-surface)',
-                border: selfHealingMode ? '1px solid rgba(16, 185, 129, 0.45)' : '1px solid var(--border-medium)',
-                borderRadius: 'var(--radius-sm)',
-                padding: '0.35rem 0.6rem',
-                fontSize: '0.78rem',
-                color: selfHealingMode ? 'var(--emerald-primary)' : 'var(--text-muted)',
-                cursor: 'pointer',
-                height: '34px',
-              }}
-              title="Autonomous multi-iteration self-healing loop: auto-rollbacks candidate dataset on regression and re-plans with LLM"
-            >
-              <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                <RotateCcw size={13} color={selfHealingMode ? 'var(--emerald-primary)' : 'var(--text-muted)'} />
-                {selfHealingMode ? 'Auto Rollback & Re-plan' : 'Standard Loop'}
-              </span>
-              <span
-                className={`badge ${selfHealingMode ? 'badge-green' : 'badge-muted'}`}
-                style={{ fontSize: '0.65rem', padding: '0.1rem 0.35rem' }}
-              >
-                {selfHealingMode ? 'ACTIVE' : 'OFF'}
-              </span>
-            </button>
-          </div>
-        )}
-
-        {/* Action Button */}
-        <div>
-          {activeMode === 'agent_loop' && (
-            <button
-              onClick={handleRunAgentLoop}
-              disabled={isAnyCleaningActive}
-              className="btn btn-primary"
-              style={{
-                width: '100%',
-                padding: '0.45rem 0.85rem',
-                fontSize: '0.825rem',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '0.45rem',
-              }}
-            >
-              {agentLoading ? (
-                <>
-                  <Loader2 size={14} className="spin" />
-                  {selfHealingMode ? 'Self-Healing Loop...' : 'Agent Iterating...'}
-                </>
-              ) : (
-                <>
-                  <Sparkles size={14} />
-                  {selfHealingMode ? 'Run Self-Healing Loop' : 'Run Autonomous Loop'}
-                </>
-              )}
-            </button>
-          )}
-
-          {activeMode === 'instant_deterministic' && (
-            <button
-              onClick={handleRunInstantClean}
-              disabled={isAnyCleaningActive}
-              className="btn btn-primary"
-              style={{
-                width: '100%',
-                padding: '0.45rem 0.85rem',
-                fontSize: '0.825rem',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '0.45rem',
-              }}
-            >
-              {instantLoading ? (
-                <>
-                  <Loader2 size={14} className="spin" />
-                  Cleaning...
-                </>
-              ) : (
-                <>
-                  <Zap size={14} />
-                  Run Instant Clean (0s)
-                </>
-              )}
-            </button>
-          )}
-
-          {activeMode === 'diagnostic_only' && (
-            <button
-              onClick={handleRunDiagnostic}
-              disabled={isAnyCleaningActive}
-              className="btn btn-secondary"
-              style={{
-                width: '100%',
-                padding: '0.45rem 0.85rem',
-                fontSize: '0.825rem',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '0.45rem',
-              }}
-            >
-              {diagnosticLoading ? (
-                <>
-                  <Loader2 size={14} className="spin" />
-                  Reasoning...
-                </>
-              ) : (
-                <>
-                  <Bot size={14} />
-                  Generate Diagnosis
-                </>
-              )}
-            </button>
-          )}
-
-          {activeMode === 'ml_evaluation' && (
-            <button
-              onClick={() => handleRunMlEvaluation()}
-              disabled={isAnyCleaningActive}
-              className="btn btn-primary"
-              style={{
-                width: '100%',
-                padding: '0.45rem 0.85rem',
-                fontSize: '0.825rem',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '0.45rem',
-                background: 'linear-gradient(135deg, #06b6d4, #2563eb)',
-                borderColor: '#06b6d4',
-              }}
-            >
-              {mlLoading ? (
-                <>
-                  <Loader2 size={14} className="spin" />
-                  Benchmarking Holdout ML...
-                </>
-              ) : (
-                <>
-                  <Brain size={14} />
-                  Run ML Holdout Benchmark
-                </>
-              )}
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Safety & Protocol Banner */}
-      <div style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        flexWrap: 'wrap',
-        gap: '0.5rem',
-        fontSize: '0.72rem',
-        color: 'var(--text-muted)',
-        marginBottom: '1rem',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-          <ShieldCheck size={13} color="var(--emerald-primary)" />
-          <span>
-            {activeMode === 'agent_loop'
-              ? selfHealingMode
-                ? 'Phase 14 Self-Healing Loop: Multi-iteration autonomous cycle with in-loop regression detection, auto rollback, and LLM re-planning (max 5 iters, 10 LLM calls).'
-                : 'Agent Loop: Qwen 3.8 27B plans tool actions → Polars executes deterministically → Re-profiles.'
-              : activeMode === 'instant_deterministic'
-              ? 'Instant Mode: Pure deterministic Polars transformations (0 tokens consumed, runs in 5ms).'
-              : activeMode === 'ml_evaluation'
-              ? 'Phase 17 ML-Aware Evaluation: 80/20 train/test holdout benchmark evaluating generalization gains before vs. after cleaning with zero target leakage.'
-              : activeMode === 'chat_clean'
-              ? 'Phase 16 Chat Mode: Natural language dataset operations with AST sandboxed dynamic functions and human approvals.'
-              : 'Diagnostic Mode: Compact fingerprint analyzed for defect impact (read-only, no modifications).'}
-          </span>
-        </div>
-        <div style={{ fontFamily: 'var(--font-mono)' }}>
-          Retention: 10-day auto-purge
-        </div>
-      </div>
-
-      {/* Error Banners */}
-      {(agentError || instantError || diagnosticError || chatError || mlError) && (
+      {/* Alert pill if actions are waiting for approval while user is viewing another tab */}
+      {pendingApprovals.length > 0 && activeMode !== 'agent_loop' && activeMode !== 'chat_clean' && (
         <div style={{
-          background: 'var(--rose-bg)',
-          border: '1px solid var(--rose-border)',
-          color: 'var(--rose-primary)',
-          borderRadius: 'var(--radius-sm)',
-          padding: '0.75rem 1rem',
-          fontSize: '0.825rem',
-          marginBottom: '1rem',
           display: 'flex',
           alignItems: 'center',
-          gap: '0.5rem',
+          justifyContent: 'space-between',
+          background: 'rgba(245, 158, 11, 0.08)',
+          border: '1px solid rgba(245, 158, 11, 0.35)',
+          borderRadius: 'var(--radius-sm)',
+          padding: '0.55rem 0.85rem',
+          marginBottom: '1rem',
+          fontSize: '0.78rem',
+          color: '#f59e0b',
         }}>
-          <AlertTriangle size={15} />
-          <span>{agentError || instantError || diagnosticError || chatError || mlError}</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+            <ShieldAlert size={15} color="#f59e0b" />
+            <span>
+              <strong>{pendingApprovals.length} Action{pendingApprovals.length > 1 ? 's' : ''} Awaiting Approval:</strong> An action in the Autonomous AI Loop requires human confirmation.
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setActiveMode('agent_loop')}
+            className="btn btn-xs"
+            style={{
+              background: 'var(--amber-primary, #f59e0b)',
+              color: '#000',
+              fontWeight: 600,
+              fontSize: '0.72rem',
+              padding: '0.2rem 0.65rem',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.3rem',
+            }}
+          >
+            Review & Authorize &rarr;
+          </button>
         </div>
       )}
 
-      {/* ── Active Loading Animations ─────────────────────────────── */}
-      {agentLoading && (
-        <div style={{
-          background: 'var(--bg-main)',
-          border: '1px solid var(--border-subtle)',
-          borderRadius: 'var(--radius-sm)',
-          padding: '1.75rem',
-          textAlign: 'center',
-          marginBottom: '1rem',
-        }}>
-          <Loader2 size={26} className="spin" style={{ color: 'var(--text-secondary)', margin: '0 auto 0.75rem' }} />
-          <div style={{ fontSize: '0.925rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.3rem' }}>
-            Groq Agent Executing Multi-Step Cleaning Loop...
+      {/* ══════════════════════════════════════════════════════════════ */}
+      {/* MODE 1: Autonomous AI Cleaning Loop (Phase 14 Self-Healing)     */}
+      {/* ══════════════════════════════════════════════════════════════ */}
+      {activeMode === 'agent_loop' && (
+        <div>
+          {/* Header & Protocol Info */}
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '0.5rem',
+            marginBottom: '0.85rem',
+            fontSize: '0.75rem',
+            color: 'var(--text-muted)',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+              <ShieldCheck size={14} color="var(--emerald-primary)" />
+              <span>
+                {selfHealingMode
+                  ? 'Phase 14 Self-Healing Loop: Multi-iteration autonomous cycle with in-loop regression detection, auto rollback, and LLM re-planning (max 5 iters, 10 LLM calls).'
+                  : 'Agent Loop: Qwen 3.8 27B plans tool actions → Polars executes deterministically → Re-profiles.'}
+              </span>
+            </div>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.7rem' }}>
+              Retention: 10-day auto-purge
+            </div>
           </div>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.78rem', maxWidth: '540px', margin: '0 auto' }}>
-            Analyzing Polars profiling deltas &rarr; Choosing deterministic transformation functions &rarr;
-            Re-profiling &rarr; Iterating until all detected anomalies are resolved.
-          </p>
-        </div>
-      )}
 
-      {instantLoading && (
-        <div style={{
-          background: 'var(--bg-main)',
-          border: '1px solid var(--border-subtle)',
-          borderRadius: 'var(--radius-sm)',
-          padding: '1.5rem',
-          textAlign: 'center',
-          marginBottom: '1rem',
-        }}>
-          <Loader2 size={24} className="spin" style={{ color: 'var(--text-secondary)', margin: '0 auto 0.5rem' }} />
-          <div style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-            Applying Instant Polars Transformations...
+          {/* Configuration Controls Bar */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+            gap: '0.75rem',
+            background: 'var(--bg-main)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: 'var(--radius-sm)',
+            padding: '0.85rem 1rem',
+            marginBottom: '1rem',
+            alignItems: 'end',
+          }}>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '0.3rem', fontWeight: 500 }}>
+                Target Optimization Task
+              </label>
+              {renderTaskSelector()}
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '0.3rem', fontWeight: 500 }}>
+                Protected Target Column
+              </label>
+              {renderTargetColumnSelector()}
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '0.3rem', fontWeight: 500 }}>
+                Max Agent Iterations
+              </label>
+              <select
+                value={maxIterations}
+                onChange={(e) => setMaxIterations(Number(e.target.value))}
+                disabled={isAnyCleaningActive}
+                className="select-input"
+                style={{
+                  width: '100%',
+                  background: 'var(--bg-surface)',
+                  border: '1px solid var(--border-medium)',
+                  color: 'var(--text-primary)',
+                  borderRadius: 'var(--radius-sm)',
+                  padding: '0.35rem 0.6rem',
+                  fontSize: '0.8rem',
+                  outline: 'none',
+                  cursor: 'pointer',
+                }}
+              >
+                <option value={2}>2 Iterations</option>
+                <option value={3}>3 Iterations (Recommended)</option>
+                <option value={4}>4 Iterations</option>
+                <option value={5}>5 Iterations (Deep Cleanup)</option>
+              </select>
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '0.3rem', fontWeight: 500 }}>
+                Safety & Approval Guard
+              </label>
+              <button
+                type="button"
+                onClick={() => setRequireApproval(!requireApproval)}
+                disabled={isAnyCleaningActive}
+                className="btn btn-ghost"
+                style={{
+                  width: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  background: requireApproval ? 'rgba(245, 158, 11, 0.08)' : 'var(--bg-surface)',
+                  border: requireApproval ? '1px solid rgba(245, 158, 11, 0.45)' : '1px solid var(--border-medium)',
+                  borderRadius: 'var(--radius-sm)',
+                  padding: '0.35rem 0.6rem',
+                  fontSize: '0.78rem',
+                  color: requireApproval ? '#f59e0b' : 'var(--text-muted)',
+                  cursor: 'pointer',
+                  height: '34px',
+                }}
+                title="When enabled, high-risk actions (column drops, outlier removal) pause the agent and await human approval"
+              >
+                <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                  <ShieldAlert size={13} color={requireApproval ? '#f59e0b' : 'var(--text-muted)'} />
+                  {requireApproval ? 'Gate High Risk' : 'Full Autopilot'}
+                </span>
+                <span
+                  className={`badge ${requireApproval ? 'badge-amber' : 'badge-muted'}`}
+                  style={{ fontSize: '0.65rem', padding: '0.1rem 0.35rem' }}
+                >
+                  {requireApproval ? 'ON' : 'OFF'}
+                </span>
+              </button>
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '0.3rem', fontWeight: 500 }}>
+                Self-Healing Loop (Phase 14)
+              </label>
+              <button
+                type="button"
+                onClick={() => setSelfHealingMode(!selfHealingMode)}
+                disabled={isAnyCleaningActive}
+                className="btn btn-ghost"
+                style={{
+                  width: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  background: selfHealingMode ? 'rgba(16, 185, 129, 0.08)' : 'var(--bg-surface)',
+                  border: selfHealingMode ? '1px solid rgba(16, 185, 129, 0.45)' : '1px solid var(--border-medium)',
+                  borderRadius: 'var(--radius-sm)',
+                  padding: '0.35rem 0.6rem',
+                  fontSize: '0.78rem',
+                  color: selfHealingMode ? 'var(--emerald-primary)' : 'var(--text-muted)',
+                  cursor: 'pointer',
+                  height: '34px',
+                }}
+                title="Autonomous multi-iteration self-healing loop: auto-rollbacks candidate dataset on regression and re-plans with LLM"
+              >
+                <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                  <RotateCcw size={13} color={selfHealingMode ? 'var(--emerald-primary)' : 'var(--text-muted)'} />
+                  {selfHealingMode ? 'Auto Rollback & Re-plan' : 'Standard Loop'}
+                </span>
+                <span
+                  className={`badge ${selfHealingMode ? 'badge-green' : 'badge-muted'}`}
+                  style={{ fontSize: '0.65rem', padding: '0.1rem 0.35rem' }}
+                >
+                  {selfHealingMode ? 'ACTIVE' : 'OFF'}
+                </span>
+              </button>
+            </div>
+
+            <div>
+              <button
+                onClick={handleRunAgentLoop}
+                disabled={isAnyCleaningActive}
+                className="btn btn-primary"
+                style={{
+                  width: '100%',
+                  padding: '0.45rem 0.85rem',
+                  fontSize: '0.825rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.45rem',
+                }}
+              >
+                {agentLoading ? (
+                  <>
+                    <Loader2 size={14} className="spin" />
+                    {selfHealingMode ? 'Self-Healing Loop...' : 'Agent Iterating...'}
+                  </>
+                ) : (
+                  <>
+                    <Sparkles size={14} />
+                    {selfHealingMode ? 'Run Self-Healing Loop' : 'Run Autonomous Loop'}
+                  </>
+                )}
+              </button>
+            </div>
           </div>
-        </div>
-      )}
+
+          {/* Agent Error Banner */}
+          {agentError && (
+            <div style={{
+              background: 'var(--rose-bg)',
+              border: '1px solid var(--rose-border)',
+              color: 'var(--rose-primary)',
+              borderRadius: 'var(--radius-sm)',
+              padding: '0.75rem 1rem',
+              fontSize: '0.825rem',
+              marginBottom: '1rem',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+            }}>
+              <AlertTriangle size={15} />
+              <span>{agentError}</span>
+            </div>
+          )}
+
+          {/* Active Loading Animation */}
+          {agentLoading && (
+            <div style={{
+              background: 'var(--bg-main)',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: 'var(--radius-sm)',
+              padding: '1.75rem',
+              textAlign: 'center',
+              marginBottom: '1rem',
+            }}>
+              <Loader2 size={26} className="spin" style={{ color: 'var(--text-secondary)', margin: '0 auto 0.75rem' }} />
+              <div style={{ fontSize: '0.925rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.3rem' }}>
+                Groq Agent Executing Multi-Step Cleaning Loop...
+              </div>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.78rem', maxWidth: '540px', margin: '0 auto' }}>
+                Analyzing Polars profiling deltas &rarr; Choosing deterministic transformation functions &rarr;
+                Re-profiling &rarr; Iterating until all detected anomalies are resolved.
+              </p>
+            </div>
+          )}
 
       {/* ── Approval Success/Error Banner ───────────────────────── */}
       {approvalBannerMsg && (
@@ -2279,8 +2205,157 @@ export default function DataCleaningCenter({
         </div>
       )}
 
-      {/* ── VIEW 2: INSTANT CLEAN RESULTS (When completed) ────────── */}
-      {instantReport && !instantLoading && (
+          {/* Ready to Run State (when not yet executed) */}
+          {!agentResult && !agentLoading && (
+            <div style={{
+              background: 'var(--bg-main)',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: 'var(--radius-sm)',
+              padding: '2rem 1.5rem',
+              textAlign: 'center',
+              marginBottom: '1rem',
+            }}>
+              <Sparkles size={28} color="var(--emerald-primary)" style={{ margin: '0 auto 0.75rem' }} />
+              <h4 style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.4rem' }}>
+                Autonomous AI Loop Ready to Launch
+              </h4>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.78rem', maxWidth: '520px', margin: '0 auto 1.25rem', lineHeight: 1.5 }}>
+                Qwen 3.8 27B agent will iteratively inspect anomalies, execute deterministic Polars transformations,
+                auto-rollback on quality regression, and pause for human approval on high-risk actions.
+              </p>
+              <button
+                type="button"
+                onClick={handleRunAgentLoop}
+                disabled={isAnyCleaningActive}
+                className="btn btn-primary btn-sm"
+                style={{ padding: '0.45rem 1.25rem', fontSize: '0.825rem', display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}
+              >
+                <Sparkles size={14} /> Launch Autonomous Cleaning Loop
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ══════════════════════════════════════════════════════════════ */}
+      {/* MODE 2: Instant Standard Clean (Deterministic Heuristics)       */}
+      {/* ══════════════════════════════════════════════════════════════ */}
+      {activeMode === 'instant_deterministic' && (
+        <div>
+          {/* Header & Protocol Info */}
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '0.5rem',
+            marginBottom: '0.85rem',
+            fontSize: '0.75rem',
+            color: 'var(--text-muted)',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+              <ShieldCheck size={14} color="var(--emerald-primary)" />
+              <span>Instant Mode: Pure deterministic Polars transformations (0 tokens consumed, runs in &lt;10ms).</span>
+            </div>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.7rem' }}>
+              Deterministic Execution
+            </div>
+          </div>
+
+          {/* Configuration Controls Bar */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+            gap: '0.75rem',
+            background: 'var(--bg-main)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: 'var(--radius-sm)',
+            padding: '0.85rem 1rem',
+            marginBottom: '1rem',
+            alignItems: 'end',
+          }}>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '0.3rem', fontWeight: 500 }}>
+                Target Optimization Task
+              </label>
+              {renderTaskSelector()}
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '0.3rem', fontWeight: 500 }}>
+                Protected Target Column
+              </label>
+              {renderTargetColumnSelector()}
+            </div>
+
+            <div>
+              <button
+                onClick={handleRunInstantClean}
+                disabled={isAnyCleaningActive}
+                className="btn btn-primary"
+                style={{
+                  width: '100%',
+                  padding: '0.45rem 0.85rem',
+                  fontSize: '0.825rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.45rem',
+                }}
+              >
+                {instantLoading ? (
+                  <>
+                    <Loader2 size={14} className="spin" />
+                    Cleaning...
+                  </>
+                ) : (
+                  <>
+                    <Zap size={14} />
+                    Run Instant Clean (0s)
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+
+          {/* Instant Clean Error Banner */}
+          {instantError && (
+            <div style={{
+              background: 'var(--rose-bg)',
+              border: '1px solid var(--rose-border)',
+              color: 'var(--rose-primary)',
+              borderRadius: 'var(--radius-sm)',
+              padding: '0.75rem 1rem',
+              fontSize: '0.825rem',
+              marginBottom: '1rem',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+            }}>
+              <AlertTriangle size={15} />
+              <span>{instantError}</span>
+            </div>
+          )}
+
+          {/* Instant Clean Loading Animation */}
+          {instantLoading && (
+            <div style={{
+              background: 'var(--bg-main)',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: 'var(--radius-sm)',
+              padding: '1.5rem',
+              textAlign: 'center',
+              marginBottom: '1rem',
+            }}>
+              <Loader2 size={24} className="spin" style={{ color: 'var(--text-secondary)', margin: '0 auto 0.5rem' }} />
+              <div style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                Applying Instant Polars Transformations...
+              </div>
+            </div>
+          )}
+
+          {/* ── VIEW 2: INSTANT CLEAN RESULTS (When completed) ────────── */}
+          {instantReport && !instantLoading && (
         <div style={{
           background: 'var(--bg-main)',
           border: '1px solid var(--border-subtle)',
@@ -2447,53 +2522,232 @@ export default function DataCleaningCenter({
         </div>
       )}
 
-      {/* ── VIEW 3: READ-ONLY DIAGNOSTIC RESULTS ──────────────────── */}
-      {diagnosticData && !diagnosticLoading && (
-        <div style={{
-          background: 'var(--bg-main)',
-          border: '1px solid var(--border-subtle)',
-          borderRadius: 'var(--radius-sm)',
-          padding: '1rem 1.25rem',
-          marginBottom: '1rem',
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.65rem' }}>
+          {/* Ready State */}
+          {!instantReport && !instantLoading && (
             <div style={{
-              fontSize: '1.25rem',
-              fontWeight: 700,
-              color: getGradeColor(diagnosticData.insights?.health_grade),
-              fontFamily: 'var(--font-mono)',
+              background: 'var(--bg-main)',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: 'var(--radius-sm)',
+              padding: '2rem 1.5rem',
+              textAlign: 'center',
+              marginBottom: '1rem',
             }}>
-              Grade {diagnosticData.insights?.health_grade} ({diagnosticData.insights?.readiness_score}% ML-Ready)
+              <Zap size={28} color="var(--emerald-primary)" style={{ margin: '0 auto 0.75rem' }} />
+              <h4 style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.4rem' }}>
+                Instant Standard Clean Ready
+              </h4>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.78rem', maxWidth: '520px', margin: '0 auto 1.25rem', lineHeight: 1.5 }}>
+                Apply deterministic Polars heuristics: remove duplicate rows, drop surrogate identifier keys, constant columns, and catastrophic null columns in under 10 milliseconds.
+              </p>
+              <button
+                type="button"
+                onClick={handleRunInstantClean}
+                disabled={isAnyCleaningActive}
+                className="btn btn-primary btn-sm"
+                style={{ padding: '0.45rem 1.25rem', fontSize: '0.825rem', display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}
+              >
+                <Zap size={14} /> Run Instant Clean (0s)
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ══════════════════════════════════════════════════════════════ */}
+      {/* MODE 3: Read-Only Diagnostic                                    */}
+      {/* ══════════════════════════════════════════════════════════════ */}
+      {activeMode === 'diagnostic_only' && (
+        <div>
+          {/* Header & Protocol Info */}
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '0.5rem',
+            marginBottom: '0.85rem',
+            fontSize: '0.75rem',
+            color: 'var(--text-muted)',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+              <ShieldCheck size={14} color="var(--emerald-primary)" />
+              <span>Diagnostic Mode: Compact fingerprint analyzed for defect impact (read-only, no modifications).</span>
+            </div>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.7rem' }}>
+              Zero Modifications
             </div>
           </div>
-          <p style={{ color: 'var(--text-primary)', fontSize: '0.825rem', lineHeight: 1.5, margin: '0 0 0.75rem' }}>
-            {diagnosticData.insights?.executive_summary}
-          </p>
 
-          {diagnosticData.insights?.defect_evaluations?.map((d, i) => (
-            <div
-              key={i}
-              style={{
-                background: 'var(--bg-surface)',
-                border: '1px solid var(--border-subtle)',
-                borderRadius: 'var(--radius-sm)',
-                padding: '0.65rem 0.85rem',
-                fontSize: '0.78rem',
-                marginBottom: '0.4rem',
-              }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.2rem' }}>
-                <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{d.defect_title}</span>
-                <span className="badge badge-muted">{d.severity}</span>
-              </div>
-              <div style={{ color: 'var(--text-secondary)', marginBottom: '0.2rem' }}>
-                {d.impact_explanation}
-              </div>
-              <div style={{ color: 'var(--emerald-primary)' }}>
-                &rarr; Recommended: {d.recommended_action}
+          {/* Configuration Controls Bar */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+            gap: '0.75rem',
+            background: 'var(--bg-main)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: 'var(--radius-sm)',
+            padding: '0.85rem 1rem',
+            marginBottom: '1rem',
+            alignItems: 'end',
+          }}>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '0.3rem', fontWeight: 500 }}>
+                Target Optimization Task
+              </label>
+              {renderTaskSelector()}
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '0.3rem', fontWeight: 500 }}>
+                Protected Target Column
+              </label>
+              {renderTargetColumnSelector()}
+            </div>
+
+            <div>
+              <button
+                onClick={handleRunDiagnostic}
+                disabled={isAnyCleaningActive}
+                className="btn btn-secondary"
+                style={{
+                  width: '100%',
+                  padding: '0.45rem 0.85rem',
+                  fontSize: '0.825rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.45rem',
+                }}
+              >
+                {diagnosticLoading ? (
+                  <>
+                    <Loader2 size={14} className="spin" />
+                    Reasoning...
+                  </>
+                ) : (
+                  <>
+                    <Bot size={14} />
+                    Generate Diagnosis
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+
+          {/* Diagnostic Error Banner */}
+          {diagnosticError && (
+            <div style={{
+              background: 'var(--rose-bg)',
+              border: '1px solid var(--rose-border)',
+              color: 'var(--rose-primary)',
+              borderRadius: 'var(--radius-sm)',
+              padding: '0.75rem 1rem',
+              fontSize: '0.825rem',
+              marginBottom: '1rem',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+            }}>
+              <AlertTriangle size={15} />
+              <span>{diagnosticError}</span>
+            </div>
+          )}
+
+          {/* Diagnostic Loading Animation */}
+          {diagnosticLoading && (
+            <div style={{
+              background: 'var(--bg-main)',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: 'var(--radius-sm)',
+              padding: '1.5rem',
+              textAlign: 'center',
+              marginBottom: '1rem',
+            }}>
+              <Loader2 size={24} className="spin" style={{ color: 'var(--text-secondary)', margin: '0 auto 0.5rem' }} />
+              <div style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                Analyzing Dataset Fingerprint with LLM...
               </div>
             </div>
-          ))}
+          )}
+
+          {/* ── VIEW 3: READ-ONLY DIAGNOSTIC RESULTS ──────────────────── */}
+          {diagnosticData && !diagnosticLoading && (
+            <div style={{
+              background: 'var(--bg-main)',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: 'var(--radius-sm)',
+              padding: '1rem 1.25rem',
+              marginBottom: '1rem',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.65rem' }}>
+                <div style={{
+                  fontSize: '1.25rem',
+                  fontWeight: 700,
+                  color: getGradeColor(diagnosticData.insights?.health_grade),
+                  fontFamily: 'var(--font-mono)',
+                }}>
+                  Grade {diagnosticData.insights?.health_grade} ({diagnosticData.insights?.readiness_score}% ML-Ready)
+                </div>
+              </div>
+              <p style={{ color: 'var(--text-primary)', fontSize: '0.825rem', lineHeight: 1.5, margin: '0 0 0.75rem' }}>
+                {diagnosticData.insights?.executive_summary}
+              </p>
+
+              {diagnosticData.insights?.defect_evaluations?.map((d, i) => (
+                <div
+                  key={i}
+                  style={{
+                    background: 'var(--bg-surface)',
+                    border: '1px solid var(--border-subtle)',
+                    borderRadius: 'var(--radius-sm)',
+                    padding: '0.65rem 0.85rem',
+                    fontSize: '0.78rem',
+                    marginBottom: '0.4rem',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.2rem' }}>
+                    <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{d.defect_title}</span>
+                    <span className="badge badge-muted">{d.severity}</span>
+                  </div>
+                  <div style={{ color: 'var(--text-secondary)', marginBottom: '0.2rem' }}>
+                    {d.impact_explanation}
+                  </div>
+                  <div style={{ color: 'var(--emerald-primary)' }}>
+                    &rarr; Recommended: {d.recommended_action}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Ready State */}
+          {!diagnosticData && !diagnosticLoading && (
+            <div style={{
+              background: 'var(--bg-main)',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: 'var(--radius-sm)',
+              padding: '2rem 1.5rem',
+              textAlign: 'center',
+              marginBottom: '1rem',
+            }}>
+              <Bot size={28} color="var(--cyan-primary, #06b6d4)" style={{ margin: '0 auto 0.75rem' }} />
+              <h4 style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.4rem' }}>
+                Defect Diagnostic Ready
+              </h4>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.78rem', maxWidth: '520px', margin: '0 auto 1.25rem', lineHeight: 1.5 }}>
+                Analyze the Polars profiling fingerprint with LLM reasoning to evaluate defect severity, downstream ML risk, and prioritized cleaning recommendations without modifying the dataset.
+              </p>
+              <button
+                type="button"
+                onClick={handleRunDiagnostic}
+                disabled={isAnyCleaningActive}
+                className="btn btn-secondary btn-sm"
+                style={{ padding: '0.45rem 1.25rem', fontSize: '0.825rem', display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}
+              >
+                <Bot size={14} /> Generate Diagnosis
+              </button>
+            </div>
+          )}
         </div>
       )}
 
