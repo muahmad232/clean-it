@@ -119,7 +119,7 @@ export default function App() {
       const profileResult = await triggerDatasetProfile(effectiveProjectId, dataset.id)
       setProfileData(profileResult.profile)
 
-      // 3. Fetch structured issues from Phase 5 detector
+      // 3. Fetch structured issues from deterministic detector
       setUploadProgress('Evaluating deterministic data quality rules...')
       const issuesResult = await fetchDatasetIssues(effectiveProjectId, dataset.id)
       setIssuesData(issuesResult.issues || [])

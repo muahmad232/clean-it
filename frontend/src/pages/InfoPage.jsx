@@ -102,10 +102,10 @@ export default function InfoPage() {
           </span>
         </div>
         <h1 style={{ fontSize: '2rem', fontWeight: 700, marginBottom: '0.75rem' }}>
-          Hardware Budgets & Execution Specifications
+          System Architecture & Execution Specifications
         </h1>
         <p style={{ color: 'var(--text-secondary)', fontSize: '1rem', lineHeight: 1.6, maxWidth: '750px' }}>
-          How Clean-It executes high-throughput data profiling and cleaning within a strict 512 MB RAM container budget.
+          How Clean-It executes high-throughput data profiling, deterministic issue detection, and safe pipeline transformations with memory-safe streaming guarantees.
         </p>
       </div>
 
@@ -139,41 +139,41 @@ export default function InfoPage() {
         </div>
       </div>
 
-      {/* RAM Budget Breakdown */}
+      {/* Memory Architecture */}
       <div className="card" style={{ padding: '1.75rem', marginBottom: '2.5rem' }}>
         <h3 style={{ fontSize: '1.1rem', fontWeight: 600, marginBottom: '0.35rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <HardDrive size={18} color="var(--text-secondary)" />
-          Memory Budget Allocation (512 MB Container)
+          Resource Allocation & Streaming Architecture
         </h3>
         <p style={{ color: 'var(--text-secondary)', fontSize: '0.825rem', marginBottom: '1.25rem' }}>
-          Strict lazy evaluation ensures zero out-of-memory crashes on memory-constrained servers.
+          Zero-copy streaming evaluation and lazy query graphs ensure sub-second response times and zero out-of-memory crashes.
         </p>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', marginBottom: '0.3rem' }}>
-              <span style={{ color: 'var(--text-secondary)' }}>Polars Streaming Scan & Aggregations (Peak)</span>
-              <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>~300 MB (58%)</span>
+              <span style={{ color: 'var(--text-secondary)' }}>Polars Streaming Scan & Lazy Aggregations (Engine Peak)</span>
+              <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>~60% Dynamic Quota</span>
             </div>
             <div style={{ width: '100%', height: '6px', background: 'var(--bg-subtle)', borderRadius: '3px', overflow: 'hidden' }}>
-              <div style={{ width: '58%', height: '100%', background: 'var(--text-secondary)' }} />
+              <div style={{ width: '60%', height: '100%', background: 'var(--text-secondary)' }} />
             </div>
           </div>
 
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', marginBottom: '0.3rem' }}>
-              <span style={{ color: 'var(--text-secondary)' }}>FastAPI ASGI Runtime & Workers</span>
-              <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>~100 MB (20%)</span>
+              <span style={{ color: 'var(--text-secondary)' }}>FastAPI ASGI Runtime & Worker Threads</span>
+              <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>~25% Base Allocation</span>
             </div>
             <div style={{ width: '100%', height: '6px', background: 'var(--bg-subtle)', borderRadius: '3px', overflow: 'hidden' }}>
-              <div style={{ width: '20%', height: '100%', background: 'var(--text-muted)' }} />
+              <div style={{ width: '25%', height: '100%', background: 'var(--text-muted)' }} />
             </div>
           </div>
 
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', marginBottom: '0.3rem' }}>
-              <span style={{ color: 'var(--text-secondary)' }}>Buffer & Ingestion Overhead</span>
-              <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>~80 MB (15%)</span>
+              <span style={{ color: 'var(--text-secondary)' }}>Transient Serialization & Ingestion Overhead</span>
+              <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>~15% Working Buffer</span>
             </div>
             <div style={{ width: '100%', height: '6px', background: 'var(--bg-subtle)', borderRadius: '3px', overflow: 'hidden' }}>
               <div style={{ width: '15%', height: '100%', background: 'var(--text-dim)' }} />
@@ -182,10 +182,10 @@ export default function InfoPage() {
         </div>
       </div>
 
-      {/* The 7 Detectors Table */}
+      {/* The 13 Detectors Table */}
       <div>
         <h3 style={{ fontSize: '1.2rem', fontWeight: 600, marginBottom: '0.35rem' }}>
-          Deterministic Issue Detector Rules
+          Deterministic Issue Detector Rules (13 Detectors)
         </h3>
         <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginBottom: '1.25rem' }}>
           Criteria evaluated by the Polars engine on raw data without dynamic code generation.

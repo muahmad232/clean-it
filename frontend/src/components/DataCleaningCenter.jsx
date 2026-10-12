@@ -76,7 +76,7 @@ export default function DataCleaningCenter({
   const [selectedTask, setSelectedTask] = useState(taskType || dataset?.task_type || 'GENERAL')
   const [targetColumn, setTargetColumn] = useState(dataset?.target_column || '')
 
-  // Phase 11: Versioning & Rollback State
+  // Dataset Versioning & Rollback State
   const [versionsList, setVersionsList] = useState([])
   const [currentVersion, setCurrentVersion] = useState(null)
   const [versionsLoading, setVersionsLoading] = useState(false)
@@ -86,7 +86,7 @@ export default function DataCleaningCenter({
   const [rollbackError, setRollbackError] = useState(null)
   const [rollbackConfirmVersion, setRollbackConfirmVersion] = useState(null)
 
-  // Phase 12: Human Approval System State
+  // Human Approval System State
   const [requireApproval, setRequireApproval] = useState(true)
   const [pendingApprovals, setPendingApprovals] = useState([])
   const [approvalsLoading, setApprovalsLoading] = useState(false)
@@ -94,7 +94,7 @@ export default function DataCleaningCenter({
   const [approvalFeedback, setApprovalFeedback] = useState({})
   const [approvalBannerMsg, setApprovalBannerMsg] = useState(null)
 
-  // Phase 14: Autonomous Self-Healing Agent Loop Configuration & State
+  // Autonomous Self-Healing Agent Loop Configuration & State
   const [maxIterations, setMaxIterations] = useState(3)
   const [selfHealingMode, setSelfHealingMode] = useState(true)
   const [agentResult, setAgentResult] = useState(null)
@@ -115,7 +115,7 @@ export default function DataCleaningCenter({
   const [diagnosticLoading, setDiagnosticLoading] = useState(false)
   const [diagnosticError, setDiagnosticError] = useState(null)
 
-  // Phase 13: Re-Profiling & Before/After Comparison State
+  // Re-Profiling & Before/After Comparison State
   const [comparisonReport, setComparisonReport] = useState(
     profile?.latest_comparison || dataset?.profile_json?.latest_comparison || null
   )
@@ -124,21 +124,21 @@ export default function DataCleaningCenter({
   const [compareVersionA, setCompareVersionA] = useState('')
   const [compareVersionB, setCompareVersionB] = useState('')
 
-  // Phase 16: Chat-Driven Autonomous Pipeline & Dynamic Functions State
+  // Chat-Driven Autonomous Pipeline & Dynamic Functions State
   const [chatInstructions, setChatInstructions] = useState('')
   const [chatLoading, setChatLoading] = useState(false)
   const [chatError, setChatError] = useState(null)
   const [chatHistory, setChatHistory] = useState([])
   const [copiedScriptId, setCopiedScriptId] = useState(null)
 
-  // Phase 17: ML-Aware Evaluation State (80/20 Holdout)
+  // ML-Aware Evaluation State (80/20 Holdout)
   const [mlReport, setMlReport] = useState(
     profile?.ml_evaluation || dataset?.profile_json?.ml_evaluation || null
   )
   const [mlLoading, setMlLoading] = useState(false)
   const [mlError, setMlError] = useState(null)
 
-  // Phase 18: Comprehensive Reporting & Audit Export State
+  // Comprehensive Reporting & Audit Export State
   const [auditReport, setAuditReport] = useState(null)
   const [auditLoading, setAuditLoading] = useState(false)
   const [auditError, setAuditError] = useState(null)
@@ -260,7 +260,7 @@ export default function DataCleaningCenter({
     loadApprovals()
   }, [dataset?.id, dataset?.current_version_id, profile?.version_number])
 
-  // ── Handler 1: Autonomous Multi-Step AI Agent Cleaning Loop (Phase 14 Self-Healing) ───────
+  // ── Handler 1: Autonomous Multi-Step AI Agent Cleaning Loop (Self-Healing) ───────
   const handleRunAgentLoop = async () => {
     if (!dataset?.id) return
     setAgentLoading(true)
@@ -323,7 +323,7 @@ export default function DataCleaningCenter({
     }
   }
 
-  // ── Handlers for Human Approval (Phase 12) ────────────────────────
+  // ── Handlers for Human Approval ────────────────────────
   const handleApproveAction = async (actionId) => {
     if (!dataset?.id || !actionId) return
     setApprovalActionInProgress(actionId)
@@ -538,7 +538,7 @@ export default function DataCleaningCenter({
     }
   }
 
-  // ── Handler 4: Rollback Dataset Version (Phase 11) ─────────────────
+  // ── Handler 4: Rollback Dataset Version ─────────────────
   const handleRollback = async (targetVersionId = null, targetVersionNumber = null) => {
     if (!dataset?.id) return
     setRollbackLoading(true)
@@ -592,7 +592,7 @@ export default function DataCleaningCenter({
     }
   }
 
-  // ── Handler 5: Phase 16 Chat-Driven Cleaning with Dynamic Functions ──
+  // ── Handler 5: Chat-Driven Cleaning with Dynamic Functions ──
   const handleRunChatClean = async (promptOverride = null) => {
     const textToRun = (promptOverride || chatInstructions).trim()
     if (!textToRun || !dataset?.id) return
@@ -661,7 +661,7 @@ export default function DataCleaningCenter({
     }
   }
 
-  // ── Handler 6: Phase 17 ML-Aware Evaluation (80/20 Holdout Benchmark) ──
+  // ── Handler 6: ML-Aware Evaluation (80/20 Holdout Benchmark) ──
   const handleRunMlEvaluation = async (overrideTarget = null, overrideTask = null) => {
     if (!dataset?.id) return
     const tgt = (overrideTarget !== null && overrideTarget !== undefined ? overrideTarget : targetColumn)?.trim()
@@ -925,16 +925,6 @@ export default function DataCleaningCenter({
           >
             <MessageSquare size={12} color={activeMode === 'chat_clean' ? 'inherit' : 'var(--emerald-primary)'} />
             Chat & Custom Tasks
-            <span style={{
-              background: 'rgba(99, 102, 241, 0.2)',
-              color: '#818cf8',
-              borderRadius: '4px',
-              padding: '0.05rem 0.3rem',
-              fontSize: '0.62rem',
-              fontWeight: 700,
-            }}>
-              P16
-            </span>
           </button>
           <button
             onClick={() => setActiveMode('instant_deterministic')}
@@ -991,16 +981,6 @@ export default function DataCleaningCenter({
           >
             <Brain size={12} color={activeMode === 'ml_evaluation' ? 'inherit' : 'var(--cyan-primary, #06b6d4)'} />
             ML Benchmark
-            <span style={{
-              background: 'rgba(6, 182, 212, 0.2)',
-              color: '#22d3ee',
-              borderRadius: '4px',
-              padding: '0.05rem 0.3rem',
-              fontSize: '0.62rem',
-              fontWeight: 700,
-            }}>
-              P17
-            </span>
             {mlReport && mlReport.status === 'SUCCESS' && (
               <span style={{
                 marginLeft: '0.25rem',
@@ -1024,16 +1004,6 @@ export default function DataCleaningCenter({
           >
             <FileCheck size={12} color={activeMode === 'audit_report' ? 'inherit' : 'var(--emerald-primary)'} />
             Audit Report
-            <span style={{
-              background: 'rgba(16, 185, 129, 0.2)',
-              color: '#34d399',
-              borderRadius: '4px',
-              padding: '0.05rem 0.3rem',
-              fontSize: '0.62rem',
-              fontWeight: 700,
-            }}>
-              P18
-            </span>
           </button>
         </div>
       </div>
@@ -1079,7 +1049,7 @@ export default function DataCleaningCenter({
       )}
 
       {/* ══════════════════════════════════════════════════════════════ */}
-      {/* MODE 1: Autonomous AI Cleaning Loop (Phase 14 Self-Healing)     */}
+      {/* MODE 1: Autonomous AI Cleaning Loop (Self-Healing)               */}
       {/* ══════════════════════════════════════════════════════════════ */}
       {activeMode === 'agent_loop' && (
         <div>
@@ -1098,8 +1068,8 @@ export default function DataCleaningCenter({
               <ShieldCheck size={14} color="var(--emerald-primary)" />
               <span>
                 {selfHealingMode
-                  ? 'Phase 14 Self-Healing Loop: Multi-iteration autonomous cycle with in-loop regression detection, auto rollback, and LLM re-planning (max 5 iters, 10 LLM calls).'
-                  : 'Agent Loop: Qwen 3.8 27B plans tool actions → Polars executes deterministically → Re-profiles.'}
+                  ? 'Autonomous Self-Healing Loop: Multi-iteration cycle with in-loop regression detection, auto rollback, and AI re-planning (max 5 iters, 10 LLM calls).'
+                  : 'Agent Loop: AI models plan tool actions → Polars executes deterministically → Re-profiles.'}
               </span>
             </div>
             <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.7rem' }}>
@@ -1201,7 +1171,7 @@ export default function DataCleaningCenter({
 
             <div>
               <label style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '0.3rem', fontWeight: 500 }}>
-                Self-Healing Loop (Phase 14)
+                Autonomous Self-Healing
               </label>
               <button
                 type="button"
@@ -1334,7 +1304,7 @@ export default function DataCleaningCenter({
         </div>
       )}
 
-      {/* ── PHASE 12: IN-CENTER HUMAN APPROVAL CARD(S) ────────── */}
+      {/* ── HUMAN APPROVAL ACTION CARDS ──────────────────────────── */}
       {pendingApprovals.length > 0 && (
         <div style={{
           display: 'flex',
@@ -1903,7 +1873,7 @@ export default function DataCleaningCenter({
               </div>
             </div>
 
-            {/* Phase 14: In-Loop Self-Healing Rollback Banner */}
+            {/* Autonomous Self-Healing Rollback Banner */}
             {agentResult.report?.total_rollbacks > 0 && (
               <div style={{
                 background: 'rgba(239, 68, 68, 0.08)',
@@ -2149,7 +2119,7 @@ export default function DataCleaningCenter({
 
                     {isExpanded && (
                       <div style={{ padding: '0.9rem 1rem', borderTop: '1px solid var(--border-subtle)', fontSize: '0.8rem' }}>
-                        {/* Phase 14: In-Loop Rollback Alert Box */}
+                        {/* In-Loop Rollback Alert Box */}
                         {isStepRolledBack && (
                           <div style={{
                             background: 'rgba(239, 68, 68, 0.08)',
@@ -2850,7 +2820,7 @@ export default function DataCleaningCenter({
         </div>
       )}
 
-      {/* ── VIEW 4: DATASET VERSIONING & REVERSIBLE ROLLBACK (PHASE 11) ── */}
+      {/* ── VIEW 4: DATASET VERSIONING & REVERSIBLE ROLLBACK ── */}
       {activeMode === 'version_history' && (
         <div style={{
           background: 'var(--bg-main)',
@@ -3206,7 +3176,7 @@ export default function DataCleaningCenter({
       )}
 
       {/* ══════════════════════════════════════════════════════════════ */}
-      {/* MODE 5: Before / After Re-Profiling & Comparison (Phase 13)    */}
+      {/* MODE 5: Before / After Re-Profiling & Comparison                */}
       {/* ══════════════════════════════════════════════════════════════ */}
       {activeMode === 'comparison' && (
         <div style={{
@@ -3233,7 +3203,7 @@ export default function DataCleaningCenter({
                   Before / After Re-Profiling & Regression Comparison
                 </span>
                 <span className="badge badge-muted" style={{ fontSize: '0.7rem' }}>
-                  Phase 13
+                  Verification Engine
                 </span>
               </div>
               <p style={{ color: 'var(--text-secondary)', fontSize: '0.76rem', margin: 0 }}>
@@ -3553,7 +3523,7 @@ export default function DataCleaningCenter({
       )}
 
       {/* ══════════════════════════════════════════════════════════════ */}
-      {/* MODE 6: Chat Assistant & Custom Tasks (Phase 16)               */}
+      {/* MODE 6: Chat Assistant & Custom Tasks                           */}
       {/* ══════════════════════════════════════════════════════════════ */}
       {activeMode === 'chat_clean' && (
         <div style={{
@@ -3581,7 +3551,7 @@ export default function DataCleaningCenter({
                   Intent-Guided Autonomous Chat Cleaning
                 </span>
                 <span className="badge badge-muted" style={{ fontSize: '0.7rem' }}>
-                  Phase 16
+                  Natural Language Engine
                 </span>
               </div>
               <p style={{ color: 'var(--text-secondary)', fontSize: '0.78rem', margin: 0 }}>
@@ -4197,7 +4167,7 @@ export default function DataCleaningCenter({
       )}
 
       {/* ══════════════════════════════════════════════════════════════ */}
-      {/* MODE 7: ML-Aware Evaluation & Generalization Benchmark (Phase 17) */}
+      {/* MODE 7: ML-Aware Evaluation & Generalization Benchmark         */}
       {/* ══════════════════════════════════════════════════════════════ */}
       {activeMode === 'ml_evaluation' && (
         <div style={{
@@ -4225,7 +4195,7 @@ export default function DataCleaningCenter({
                   ML-Aware Holdout Evaluation & Generalization Benchmark
                 </span>
                 <span className="badge badge-muted" style={{ fontSize: '0.7rem' }}>
-                  Phase 17
+                  Generalization Benchmark
                 </span>
               </div>
               <p style={{ color: 'var(--text-secondary)', fontSize: '0.78rem', margin: 0 }}>
@@ -4663,7 +4633,7 @@ export default function DataCleaningCenter({
       )}
 
       {/* ══════════════════════════════════════════════════════════════ */}
-      {/* MODE 8: Comprehensive Reporting & Audit Export (Phase 18)     */}
+      {/* MODE 8: Comprehensive Reporting & Audit Export                 */}
       {/* ══════════════════════════════════════════════════════════════ */}
       {activeMode === 'audit_report' && (
         <div style={{
@@ -4691,7 +4661,7 @@ export default function DataCleaningCenter({
                   Comprehensive Data Audit & Quality Report
                 </span>
                 <span className="badge badge-muted" style={{ fontSize: '0.7rem' }}>
-                  Phase 18
+                  Audit & Compliance
                 </span>
               </div>
               <p style={{ color: 'var(--text-secondary)', fontSize: '0.78rem', margin: 0 }}>

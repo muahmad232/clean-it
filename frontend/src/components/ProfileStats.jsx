@@ -42,7 +42,7 @@ export default function ProfileStats({ profile, issues }) {
             {memMb} <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 400 }}>MB</span>
           </div>
           <div style={{ fontSize: '0.75rem', color: 'var(--emerald-primary)', marginTop: '0.2rem' }}>
-            Streaming scan (Render 512MB safe)
+            High-performance Polars streaming scan
           </div>
         </div>
 

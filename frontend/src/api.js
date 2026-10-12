@@ -422,7 +422,7 @@ export async function runAgenticCleaning(projectId, datasetId, taskType = 'GENER
 }
 
 /**
- * Phase 14: Autonomous Self-Healing Agent Loop
+ * Autonomous Self-Healing Agent Loop
  * Multi-iteration loop with in-loop regression detection, auto rollback, and re-planning.
  */
 export async function runSelfHealingClean(projectId, datasetId, options = {}) {
@@ -466,7 +466,7 @@ export async function runSelfHealingClean(projectId, datasetId, options = {}) {
 }
 
 /**
- * Phase 12: Human Approval System
+ * Human Approval System
  */
 
 export async function fetchDatasetApprovals(projectId, datasetId, statusFilter = null) {
@@ -513,7 +513,7 @@ export async function submitApprovalDecision(projectId, datasetId, actionId, dec
 }
 
 /**
- * Phase 11: Dataset Versioning & Rollback
+ * Dataset Versioning & Rollback
  */
 
 export async function fetchDatasetVersions(projectId, datasetId) {
@@ -583,7 +583,7 @@ export async function downloadDatasetVersion(projectId, datasetId, versionNumber
 }
 
 /**
- * Phase 13: Re-Profiling & Before/After Comparison
+ * Re-Profiling & Before/After Comparison
  */
 
 export async function fetchDatasetComparison(projectId, datasetId, vOld = null, vNew = null) {
@@ -607,7 +607,7 @@ export async function fetchDatasetComparison(projectId, datasetId, vOld = null, 
 }
 
 /**
- * Phase 16: Chat-Driven Autonomous Pipeline & Safe Dynamic Transformations
+ * Chat-Driven Autonomous Pipeline & Safe Dynamic Transformations
  */
 export async function chatCleanDataset(projectId, datasetId, payload) {
   const url = projectId
@@ -631,7 +631,7 @@ export async function chatCleanDataset(projectId, datasetId, payload) {
 }
 
 /**
- * Phase 17: ML-Aware Evaluation
+ * ML-Aware Evaluation
  */
 export async function evaluateDatasetMl(projectId, datasetId, options = {}) {
   const url = projectId
@@ -675,7 +675,7 @@ export async function fetchDatasetMlEvaluation(projectId, datasetId) {
 }
 
 /**
- * Phase 18: Comprehensive Reporting & Audit Export
+ * Comprehensive Reporting & Audit Export
  */
 export async function fetchDatasetAuditReport(projectId, datasetId, format = 'json') {
   const url = projectId
