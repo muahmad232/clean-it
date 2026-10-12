@@ -674,5 +674,48 @@ export async function fetchDatasetMlEvaluation(projectId, datasetId) {
   return await res.json()
 }
 
+/**
+ * Phase 18: Comprehensive Reporting & Audit Export
+ */
+export async function fetchDatasetAuditReport(projectId, datasetId, format = 'json') {
+  const url = projectId
+    ? `${API_BASE}/api/v1/projects/${projectId}/datasets/${datasetId}/report?format=${format}`
+    : `${API_BASE}/api/v1/datasets/${datasetId}/report?format=${format}`
+
+  const res = await fetch(url, {
+    headers: getAuthHeaders(),
+  })
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({}))
+    throw new Error(errBody.detail?.message || errBody.detail?.error || `Could not fetch audit report (HTTP ${res.status})`)
+  }
+  if (format === 'html') {
+    return await res.text()
+  }
+  return await res.json()
+}
+
+export function getDatasetAuditReportHtmlUrl(projectId, datasetId) {
+  return projectId
+    ? `${API_BASE}/api/v1/projects/${projectId}/datasets/${datasetId}/report?format=html`
+    : `${API_BASE}/api/v1/datasets/${datasetId}/report?format=html`
+}
+
+export async function downloadDatasetAuditReport(projectId, datasetId, format = 'json') {
+  const url = projectId
+    ? `${API_BASE}/api/v1/projects/${projectId}/datasets/${datasetId}/report/download?format=${format}`
+    : `${API_BASE}/api/v1/datasets/${datasetId}/report/download?format=${format}`
+
+  const res = await fetch(url, {
+    headers: getAuthHeaders(),
+  })
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({}))
+    throw new Error(errBody.detail?.message || errBody.detail?.error || `Failed to download audit report (HTTP ${res.status})`)
+  }
+  return await res.blob()
+}
+
+
 
 

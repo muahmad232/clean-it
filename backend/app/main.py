@@ -174,6 +174,10 @@ def _register_routes(app: FastAPI) -> None:
     from app.routers.evaluation import router as evaluation_router
     app.include_router(evaluation_router)
 
+    # Phase 18: Audit Reporting & Quality Export
+    from app.routers.report import router as report_router
+    app.include_router(report_router)
+
     @app.get(
         "/health",
         tags=["System"],

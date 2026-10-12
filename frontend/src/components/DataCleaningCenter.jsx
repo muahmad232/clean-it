@@ -36,6 +36,9 @@ import {
   Target,
   Award,
   Activity,
+  FileText,
+  Printer,
+  ExternalLink,
 } from 'lucide-react'
 import {
   cleanDataset,
@@ -53,6 +56,9 @@ import {
   downloadDatasetVersion,
   evaluateDatasetMl,
   fetchDatasetMlEvaluation,
+  fetchDatasetAuditReport,
+  downloadDatasetAuditReport,
+  getDatasetAuditReportHtmlUrl,
 } from '../api'
 
 export default function DataCleaningCenter({
@@ -131,6 +137,57 @@ export default function DataCleaningCenter({
   )
   const [mlLoading, setMlLoading] = useState(false)
   const [mlError, setMlError] = useState(null)
+
+  // Phase 18: Comprehensive Reporting & Audit Export State
+  const [auditReport, setAuditReport] = useState(null)
+  const [auditLoading, setAuditLoading] = useState(false)
+  const [auditError, setAuditError] = useState(null)
+  const [auditDownloading, setAuditDownloading] = useState(null) // 'json' | 'html'
+
+  const loadAuditReport = async () => {
+    if (!dataset?.id) return
+    setAuditLoading(true)
+    setAuditError(null)
+    try {
+      const data = await fetchDatasetAuditReport(projectId || dataset.project_id, dataset.id, 'json')
+      setAuditReport(data)
+    } catch (err) {
+      console.warn('Could not load audit report:', err)
+      setAuditError(err.message || 'Could not load audit report.')
+    } finally {
+      setAuditLoading(false)
+    }
+  }
+
+  const handleDownloadAuditReport = async (format = 'json') => {
+    if (!dataset?.id) return
+    setAuditDownloading(format)
+    try {
+      const blob = await downloadDatasetAuditReport(projectId || dataset.project_id, dataset.id, format)
+      const baseName = (dataset?.original_filename || 'dataset').replace(/\.[^/.]+$/, '')
+      const verNum = auditReport?.dataset_overview?.current_version ?? (currentVersion?.version_number ?? 0)
+      const fileName = `${baseName}_v${verNum}_audit_report.${format}`
+      const blobUrl = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = blobUrl
+      a.download = fileName
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      window.URL.revokeObjectURL(blobUrl)
+    } catch (err) {
+      console.error('Failed to download audit report:', err)
+      alert(`Could not download audit report: ${err.message}`)
+    } finally {
+      setAuditDownloading(null)
+    }
+  }
+
+  const handleOpenHtmlReport = () => {
+    if (!dataset?.id) return
+    const url = getDatasetAuditReportHtmlUrl(projectId || dataset.project_id, dataset.id)
+    window.open(url, '_blank')
+  }
 
   const loadComparison = async (vOld = null, vNew = null) => {
     if (!dataset?.id) return
@@ -954,6 +1011,29 @@ export default function DataCleaningCenter({
                 {mlReport.primary_improvement_pct >= 0 ? `+${mlReport.primary_improvement_pct.toFixed(1)}%` : `${mlReport.primary_improvement_pct.toFixed(1)}%`}
               </span>
             )}
+          </button>
+          <button
+            onClick={() => {
+              setActiveMode('audit_report')
+              if (!auditReport && !auditLoading) {
+                loadAuditReport()
+              }
+            }}
+            className={`btn btn-xs ${activeMode === 'audit_report' ? 'btn-primary' : 'btn-ghost'}`}
+            style={{ fontSize: '0.75rem', padding: '0.25rem 0.65rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}
+          >
+            <FileCheck size={12} color={activeMode === 'audit_report' ? 'inherit' : 'var(--emerald-primary)'} />
+            Audit Report
+            <span style={{
+              background: 'rgba(16, 185, 129, 0.2)',
+              color: '#34d399',
+              borderRadius: '4px',
+              padding: '0.05rem 0.3rem',
+              fontSize: '0.62rem',
+              fontWeight: 700,
+            }}>
+              P18
+            </span>
           </button>
         </div>
       </div>
@@ -4577,6 +4657,501 @@ export default function DataCleaningCenter({
                   </p>
                 </div>
               )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ══════════════════════════════════════════════════════════════ */}
+      {/* MODE 8: Comprehensive Reporting & Audit Export (Phase 18)     */}
+      {/* ══════════════════════════════════════════════════════════════ */}
+      {activeMode === 'audit_report' && (
+        <div style={{
+          background: 'var(--bg-surface)',
+          border: '1px solid var(--border-medium)',
+          borderRadius: 'var(--radius-sm)',
+          padding: '1.25rem',
+          marginBottom: '1rem',
+        }}>
+          {/* Header & Export Actions Bar */}
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '0.75rem',
+            marginBottom: '1.2rem',
+            paddingBottom: '0.85rem',
+            borderBottom: '1px solid var(--border-subtle)',
+          }}>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.2rem' }}>
+                <span style={{ fontWeight: 600, fontSize: '0.95rem', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                  <FileCheck size={16} color="var(--emerald-primary)" />
+                  Comprehensive Data Audit & Quality Report
+                </span>
+                <span className="badge badge-muted" style={{ fontSize: '0.7rem' }}>
+                  Phase 18
+                </span>
+              </div>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '0.78rem', margin: 0 }}>
+                Synthesizes data quality metrics, detected issues, applied transformations, version lineage, and ML generalization into an audit document.
+              </p>
+            </div>
+
+            {/* Action Buttons */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={() => loadAuditReport()}
+                disabled={auditLoading}
+                className="btn btn-xs btn-ghost"
+                style={{ fontSize: '0.75rem', padding: '0.3rem 0.6rem' }}
+                title="Refresh audit report data"
+              >
+                <RefreshCw size={12} className={auditLoading ? 'animate-spin' : ''} /> Refresh
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDownloadAuditReport('json')}
+                disabled={auditDownloading === 'json' || auditLoading}
+                className="btn btn-xs btn-ghost"
+                style={{ fontSize: '0.75rem', padding: '0.3rem 0.65rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}
+              >
+                {auditDownloading === 'json' ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+                Export JSON
+              </button>
+              <button
+                type="button"
+                onClick={handleOpenHtmlReport}
+                disabled={auditLoading}
+                className="btn btn-xs btn-primary"
+                style={{
+                  fontSize: '0.75rem',
+                  padding: '0.3rem 0.75rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.35rem',
+                  background: 'linear-gradient(135deg, #059669, #0d9488)',
+                  borderColor: '#059669',
+                }}
+              >
+                <Printer size={12} /> View / Print HTML Report <ExternalLink size={11} />
+              </button>
+            </div>
+          </div>
+
+          {/* Loading Spinner */}
+          {auditLoading && !auditReport && (
+            <div style={{ textAlign: 'center', padding: '3rem 1rem', color: 'var(--text-muted)' }}>
+              <Loader2 size={28} className="animate-spin" style={{ margin: '0 auto 0.75rem', color: 'var(--emerald-primary)' }} />
+              <p style={{ margin: 0, fontSize: '0.85rem' }}>Compiling verifiable audit report and calculating quality deltas...</p>
+            </div>
+          )}
+
+          {/* Error Banner */}
+          {auditError && (
+            <div style={{
+              background: 'rgba(244, 63, 94, 0.08)',
+              border: '1px solid rgba(244, 63, 94, 0.35)',
+              borderRadius: 'var(--radius-sm)',
+              padding: '1rem',
+              marginBottom: '1rem',
+              color: '#f43f5e',
+              fontSize: '0.8rem',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', marginBottom: '0.25rem', fontWeight: 600 }}>
+                <AlertTriangle size={15} /> Failed to generate audit report
+              </div>
+              <div>{auditError}</div>
+              <button
+                onClick={() => loadAuditReport()}
+                className="btn btn-xs"
+                style={{ marginTop: '0.5rem', background: '#f43f5e', color: '#fff' }}
+              >
+                Try Again
+              </button>
+            </div>
+          )}
+
+          {/* Report Content */}
+          {!auditLoading && auditReport && (
+            <div>
+              {/* Executive Summary Card with Grade */}
+              <div style={{
+                background: 'var(--bg-main)',
+                border: '1px solid var(--border-medium)',
+                borderRadius: 'var(--radius-sm)',
+                padding: '1.25rem',
+                marginBottom: '1rem',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '1rem',
+              }}>
+                <div style={{ flex: 1, minWidth: '280px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.35rem' }}>
+                    <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>
+                      Executive Summary • {auditReport.dataset_overview.dataset_name}
+                    </span>
+                    <span className="badge badge-muted" style={{ fontSize: '0.65rem' }}>
+                      Version v{auditReport.dataset_overview.current_version}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '0.85rem', color: 'var(--text-primary)', lineHeight: 1.55 }}>
+                    {auditReport.final_quality_summary}
+                  </div>
+                </div>
+
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '1rem',
+                  background: 'var(--bg-surface)',
+                  padding: '0.75rem 1.25rem',
+                  borderRadius: 'var(--radius-sm)',
+                  border: '1px solid var(--border-subtle)',
+                }}>
+                  <div style={{ textAlign: 'center' }}>
+                    <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>
+                      Health Grade
+                    </div>
+                    <div style={{
+                      fontSize: '2rem',
+                      fontWeight: 900,
+                      color: getGradeColor(auditReport.quality_metrics.health_grade_after),
+                      lineHeight: 1.1,
+                    }}>
+                      {auditReport.quality_metrics.health_grade_after}
+                    </div>
+                  </div>
+                  <div style={{ borderLeft: '1px solid var(--border-medium)', paddingLeft: '1rem' }}>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Quality Score</div>
+                    <div style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                      {auditReport.quality_metrics.after_score.toFixed(1)} <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>/ 100</span>
+                    </div>
+                    <div style={{
+                      fontSize: '0.72rem',
+                      fontWeight: 700,
+                      color: auditReport.quality_metrics.score_delta >= 0 ? 'var(--emerald-primary)' : '#f43f5e',
+                    }}>
+                      {auditReport.quality_metrics.score_delta >= 0 ? `+${auditReport.quality_metrics.score_delta.toFixed(1)}` : auditReport.quality_metrics.score_delta.toFixed(1)} pts
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Warnings and Caveats Alert */}
+              {auditReport.warnings_and_caveats && auditReport.warnings_and_caveats.length > 0 && (
+                <div style={{
+                  background: 'rgba(245, 158, 11, 0.08)',
+                  border: '1px solid rgba(245, 158, 11, 0.35)',
+                  borderLeft: '4px solid #f59e0b',
+                  borderRadius: 'var(--radius-sm)',
+                  padding: '0.85rem 1rem',
+                  marginBottom: '1rem',
+                  fontSize: '0.78rem',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#f59e0b', fontWeight: 600, marginBottom: '0.35rem' }}>
+                    <AlertTriangle size={14} /> Operational Warnings & Quality Caveats
+                  </div>
+                  <ul style={{ margin: 0, paddingLeft: '1.2rem', color: 'var(--text-secondary)' }}>
+                    {auditReport.warnings_and_caveats.map((w, idx) => (
+                      <li key={idx} style={{ marginBottom: '0.2rem' }}>{w}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* 4-Stat Overview Grid */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                gap: '0.75rem',
+                marginBottom: '1rem',
+              }}>
+                <div style={{ background: 'var(--bg-main)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-sm)', padding: '0.85rem' }}>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Original Dimensions</div>
+                  <div style={{ fontSize: '1.2rem', fontWeight: 700, color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
+                    {auditReport.dataset_overview.original_shape.rows.toLocaleString()} × {auditReport.dataset_overview.original_shape.columns}
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>rows × columns at ingest</div>
+                </div>
+
+                <div style={{ background: 'var(--bg-main)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-sm)', padding: '0.85rem' }}>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Cleaned Dimensions</div>
+                  <div style={{ fontSize: '1.2rem', fontWeight: 700, color: 'var(--emerald-primary)', fontFamily: 'var(--font-mono)' }}>
+                    {auditReport.dataset_overview.current_shape.rows.toLocaleString()} × {auditReport.dataset_overview.current_shape.columns}
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                    net rows altered: {(auditReport.dataset_overview.original_shape.rows - auditReport.dataset_overview.current_shape.rows).toLocaleString()}
+                  </div>
+                </div>
+
+                <div style={{ background: 'var(--bg-main)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-sm)', padding: '0.85rem' }}>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Target & Task</div>
+                  <div style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-primary)', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                    {auditReport.dataset_overview.task_type}
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                    target: {auditReport.dataset_overview.target_column || 'None (Unsupervised)'}
+                  </div>
+                </div>
+
+                <div style={{ background: 'var(--bg-main)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-sm)', padding: '0.85rem' }}>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Defect Remediation</div>
+                  <div style={{ fontSize: '1.2rem', fontWeight: 700, color: '#38bdf8', fontFamily: 'var(--font-mono)' }}>
+                    {auditReport.issues_resolved_count} / {auditReport.detected_issues.length}
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                    {auditReport.issues_remaining_count} remaining open defect(s)
+                  </div>
+                </div>
+              </div>
+
+              {/* 4-Factor Quality Breakdown Table */}
+              <div style={{
+                background: 'var(--bg-main)',
+                border: '1px solid var(--border-medium)',
+                borderRadius: 'var(--radius-sm)',
+                padding: '0.85rem 1rem',
+                marginBottom: '1rem',
+              }}>
+                <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.65rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                  <Sliders size={13} color="var(--emerald-primary)" />
+                  4-Factor Dataset Quality Score Breakdown (0–100 Scale)
+                </div>
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', fontSize: '0.76rem', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid var(--border-subtle)', textAlign: 'left', color: 'var(--text-muted)' }}>
+                        <th style={{ padding: '0.35rem 0.5rem', fontWeight: 500 }}>Quality Metric</th>
+                        <th style={{ padding: '0.35rem 0.5rem', fontWeight: 500, textAlign: 'right' }}>Weight</th>
+                        <th style={{ padding: '0.35rem 0.5rem', fontWeight: 500, textAlign: 'right' }}>Baseline (Raw)</th>
+                        <th style={{ padding: '0.35rem 0.5rem', fontWeight: 500, textAlign: 'right' }}>Cleaned (v{auditReport.dataset_overview.current_version})</th>
+                        <th style={{ padding: '0.35rem 0.5rem', fontWeight: 500, textAlign: 'right' }}>Net Delta</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                        <td style={{ padding: '0.45rem 0.5rem', fontWeight: 600, color: 'var(--text-primary)' }}>Completeness Score (100 - Null %)</td>
+                        <td style={{ padding: '0.45rem 0.5rem', textAlign: 'right', color: 'var(--text-muted)' }}>35%</td>
+                        <td style={{ padding: '0.45rem 0.5rem', textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{auditReport.quality_metrics.completeness_before.toFixed(1)}</td>
+                        <td style={{ padding: '0.45rem 0.5rem', textAlign: 'right', fontWeight: 700, color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{auditReport.quality_metrics.completeness_after.toFixed(1)}</td>
+                        <td style={{ padding: '0.45rem 0.5rem', textAlign: 'right', fontFamily: 'var(--font-mono)', color: auditReport.quality_metrics.completeness_delta >= 0 ? 'var(--emerald-primary)' : '#f43f5e', fontWeight: 700 }}>
+                          {auditReport.quality_metrics.completeness_delta >= 0 ? `+${auditReport.quality_metrics.completeness_delta.toFixed(1)}` : auditReport.quality_metrics.completeness_delta.toFixed(1)}
+                        </td>
+                      </tr>
+                      <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                        <td style={{ padding: '0.45rem 0.5rem', fontWeight: 600, color: 'var(--text-primary)' }}>Type Consistency Score</td>
+                        <td style={{ padding: '0.45rem 0.5rem', textAlign: 'right', color: 'var(--text-muted)' }}>25%</td>
+                        <td style={{ padding: '0.45rem 0.5rem', textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{auditReport.quality_metrics.type_consistency_before.toFixed(1)}</td>
+                        <td style={{ padding: '0.45rem 0.5rem', textAlign: 'right', fontWeight: 700, color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{auditReport.quality_metrics.type_consistency_after.toFixed(1)}</td>
+                        <td style={{ padding: '0.45rem 0.5rem', textAlign: 'right', fontFamily: 'var(--font-mono)', color: auditReport.quality_metrics.type_consistency_delta >= 0 ? 'var(--emerald-primary)' : '#f43f5e', fontWeight: 700 }}>
+                          {auditReport.quality_metrics.type_consistency_delta >= 0 ? `+${auditReport.quality_metrics.type_consistency_delta.toFixed(1)}` : auditReport.quality_metrics.type_consistency_delta.toFixed(1)}
+                        </td>
+                      </tr>
+                      <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                        <td style={{ padding: '0.45rem 0.5rem', fontWeight: 600, color: 'var(--text-primary)' }}>Uniqueness Score (100 - Duplicate %)</td>
+                        <td style={{ padding: '0.45rem 0.5rem', textAlign: 'right', color: 'var(--text-muted)' }}>20%</td>
+                        <td style={{ padding: '0.45rem 0.5rem', textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{auditReport.quality_metrics.uniqueness_before.toFixed(1)}</td>
+                        <td style={{ padding: '0.45rem 0.5rem', textAlign: 'right', fontWeight: 700, color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{auditReport.quality_metrics.uniqueness_after.toFixed(1)}</td>
+                        <td style={{ padding: '0.45rem 0.5rem', textAlign: 'right', fontFamily: 'var(--font-mono)', color: auditReport.quality_metrics.uniqueness_delta >= 0 ? 'var(--emerald-primary)' : '#f43f5e', fontWeight: 700 }}>
+                          {auditReport.quality_metrics.uniqueness_delta >= 0 ? `+${auditReport.quality_metrics.uniqueness_delta.toFixed(1)}` : auditReport.quality_metrics.uniqueness_delta.toFixed(1)}
+                        </td>
+                      </tr>
+                      <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                        <td style={{ padding: '0.45rem 0.5rem', fontWeight: 600, color: 'var(--text-primary)' }}>Validity Score (Domain & Range)</td>
+                        <td style={{ padding: '0.45rem 0.5rem', textAlign: 'right', color: 'var(--text-muted)' }}>20%</td>
+                        <td style={{ padding: '0.45rem 0.5rem', textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{auditReport.quality_metrics.validity_before.toFixed(1)}</td>
+                        <td style={{ padding: '0.45rem 0.5rem', textAlign: 'right', fontWeight: 700, color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{auditReport.quality_metrics.validity_after.toFixed(1)}</td>
+                        <td style={{ padding: '0.45rem 0.5rem', textAlign: 'right', fontFamily: 'var(--font-mono)', color: auditReport.quality_metrics.validity_delta >= 0 ? 'var(--emerald-primary)' : '#f43f5e', fontWeight: 700 }}>
+                          {auditReport.quality_metrics.validity_delta >= 0 ? `+${auditReport.quality_metrics.validity_delta.toFixed(1)}` : auditReport.quality_metrics.validity_delta.toFixed(1)}
+                        </td>
+                      </tr>
+                      <tr style={{ background: 'var(--bg-surface)', fontWeight: 700 }}>
+                        <td style={{ padding: '0.55rem 0.5rem' }}>Composite Overall Quality Score</td>
+                        <td style={{ padding: '0.55rem 0.5rem', textAlign: 'right', color: 'var(--text-muted)' }}>100%</td>
+                        <td style={{ padding: '0.55rem 0.5rem', textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{auditReport.quality_metrics.before_score.toFixed(1)} ({auditReport.quality_metrics.health_grade_before})</td>
+                        <td style={{ padding: '0.55rem 0.5rem', textAlign: 'right', fontFamily: 'var(--font-mono)', color: getGradeColor(auditReport.quality_metrics.health_grade_after) }}>{auditReport.quality_metrics.after_score.toFixed(1)} ({auditReport.quality_metrics.health_grade_after})</td>
+                        <td style={{ padding: '0.55rem 0.5rem', textAlign: 'right', fontFamily: 'var(--font-mono)', color: auditReport.quality_metrics.score_delta >= 0 ? 'var(--emerald-primary)' : '#f43f5e' }}>
+                          {auditReport.quality_metrics.score_delta >= 0 ? `+${auditReport.quality_metrics.score_delta.toFixed(1)}` : auditReport.quality_metrics.score_delta.toFixed(1)}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* ML Performance Benchmark Card (if run) */}
+              {auditReport.ml_performance && auditReport.ml_performance.status === 'SUCCESS' && (
+                <div style={{
+                  background: 'var(--bg-main)',
+                  border: '1px solid var(--border-medium)',
+                  borderRadius: 'var(--radius-sm)',
+                  padding: '0.85rem 1rem',
+                  marginBottom: '1rem',
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.65rem' }}>
+                    <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                      <Brain size={13} color="var(--cyan-primary, #06b6d4)" />
+                      Machine Learning Generalization Holdout Delta
+                    </div>
+                    <span className="badge badge-green" style={{ fontSize: '0.68rem' }}>
+                      {auditReport.ml_performance.model_name} • {auditReport.ml_performance.primary_metric_name}
+                    </span>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.75rem', fontSize: '0.76rem' }}>
+                    <div style={{ background: 'var(--bg-surface)', padding: '0.65rem', borderRadius: 'var(--radius-sm)' }}>
+                      <div style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>Primary Metric Improvement</div>
+                      <div style={{ fontSize: '1.2rem', fontWeight: 700, color: auditReport.ml_performance.primary_improved ? 'var(--emerald-primary)' : '#f43f5e' }}>
+                        {auditReport.ml_performance.primary_raw_score?.toFixed(3)} → {auditReport.ml_performance.primary_cleaned_score?.toFixed(3)}
+                        <span style={{ fontSize: '0.72rem', marginLeft: '0.35rem' }}>
+                          ({auditReport.ml_performance.primary_improvement_pct >= 0 ? '+' : ''}{auditReport.ml_performance.primary_improvement_pct?.toFixed(1)}%)
+                        </span>
+                      </div>
+                    </div>
+                    <div style={{ background: 'var(--bg-surface)', padding: '0.65rem', borderRadius: 'var(--radius-sm)' }}>
+                      <div style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>Holdout Split (Zero Leakage)</div>
+                      <div style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                        {auditReport.ml_performance.train_samples} train / {auditReport.ml_performance.test_samples} test rows (20%)
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Detected Issues Inventory Table */}
+              <div style={{
+                background: 'var(--bg-main)',
+                border: '1px solid var(--border-medium)',
+                borderRadius: 'var(--radius-sm)',
+                padding: '0.85rem 1rem',
+                marginBottom: '1rem',
+              }}>
+                <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.65rem' }}>
+                  Data Quality Issues Inventory ({auditReport.detected_issues.length})
+                </div>
+                <div style={{ overflowX: 'auto', maxHeight: '240px' }}>
+                  <table style={{ width: '100%', fontSize: '0.75rem', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid var(--border-subtle)', textAlign: 'left', color: 'var(--text-muted)' }}>
+                        <th style={{ padding: '0.35rem 0.5rem' }}>Severity</th>
+                        <th style={{ padding: '0.35rem 0.5rem' }}>Issue Type</th>
+                        <th style={{ padding: '0.35rem 0.5rem' }}>Column</th>
+                        <th style={{ padding: '0.35rem 0.5rem' }}>Details</th>
+                        <th style={{ padding: '0.35rem 0.5rem', textAlign: 'center' }}>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {auditReport.detected_issues.map((iss, idx) => (
+                        <tr key={idx} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                          <td style={{ padding: '0.4rem 0.5rem' }}>
+                            <span className={`badge ${iss.severity === 'CRITICAL' || iss.severity === 'HIGH' ? 'badge-rose' : (iss.severity === 'MEDIUM' ? 'badge-amber' : 'badge-muted')}`} style={{ fontSize: '0.65rem' }}>
+                              {iss.severity}
+                            </span>
+                          </td>
+                          <td style={{ padding: '0.4rem 0.5rem', fontFamily: 'var(--font-mono)' }}>{iss.issue_type}</td>
+                          <td style={{ padding: '0.4rem 0.5rem', fontFamily: 'var(--font-mono)' }}>{iss.column_name || 'all'}</td>
+                          <td style={{ padding: '0.4rem 0.5rem', color: 'var(--text-secondary)' }}>{iss.description}</td>
+                          <td style={{ padding: '0.4rem 0.5rem', textAlign: 'center' }}>
+                            <span className={`badge ${iss.status === 'RESOLVED' ? 'badge-green' : 'badge-rose'}`} style={{ fontSize: '0.65rem' }}>
+                              {iss.status}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Applied Transformations Table */}
+              <div style={{
+                background: 'var(--bg-main)',
+                border: '1px solid var(--border-medium)',
+                borderRadius: 'var(--radius-sm)',
+                padding: '0.85rem 1rem',
+                marginBottom: '1rem',
+              }}>
+                <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.65rem' }}>
+                  Applied Transformations & Clean Actions ({auditReport.applied_transformations.length})
+                </div>
+                <div style={{ overflowX: 'auto', maxHeight: '240px' }}>
+                  <table style={{ width: '100%', fontSize: '0.75rem', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid var(--border-subtle)', textAlign: 'left', color: 'var(--text-muted)' }}>
+                        <th style={{ padding: '0.35rem 0.5rem' }}>Operation Tool</th>
+                        <th style={{ padding: '0.35rem 0.5rem' }}>Target Columns</th>
+                        <th style={{ padding: '0.35rem 0.5rem', textAlign: 'right' }}>Rows Affected</th>
+                        <th style={{ padding: '0.35rem 0.5rem' }}>Action Description</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {auditReport.applied_transformations.map((tr, idx) => (
+                        <tr key={idx} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                          <td style={{ padding: '0.4rem 0.5rem', fontWeight: 600, fontFamily: 'var(--font-mono)' }}>{tr.tool_name}</td>
+                          <td style={{ padding: '0.4rem 0.5rem' }}>{tr.columns_affected?.join(', ') || '-'}</td>
+                          <td style={{ padding: '0.4rem 0.5rem', textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{tr.rows_affected.toLocaleString()}</td>
+                          <td style={{ padding: '0.4rem 0.5rem', color: 'var(--text-secondary)' }}>{tr.description}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Reversible Version History Lineage */}
+              <div style={{
+                background: 'var(--bg-main)',
+                border: '1px solid var(--border-medium)',
+                borderRadius: 'var(--radius-sm)',
+                padding: '0.85rem 1rem',
+              }}>
+                <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.65rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                  <History size={13} color="var(--emerald-primary)" />
+                  Reversible Version Lineage Milestones ({auditReport.version_timeline.length})
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
+                  {auditReport.version_timeline.map((v, idx) => (
+                    <div key={idx} style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '0.45rem 0.65rem',
+                      background: 'var(--bg-surface)',
+                      borderRadius: 'var(--radius-sm)',
+                      border: '1px solid var(--border-subtle)',
+                      fontSize: '0.76rem',
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                        <span className="badge badge-primary" style={{ fontSize: '0.68rem', fontFamily: 'var(--font-mono)' }}>
+                          v{v.version_number}
+                        </span>
+                        <span style={{ fontWeight: 500, color: 'var(--text-primary)' }}>{v.action_summary}</span>
+                        <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>{v.created_at.slice(0, 19).replace('T', ' ')}</span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                        {v.quality_score && (
+                          <span style={{ fontWeight: 600, color: 'var(--emerald-primary)' }}>
+                            Score: {v.quality_score.toFixed(1)}
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => handleDownloadVersion(v.version_number, 'csv')}
+                          className="btn btn-xs btn-ghost"
+                          style={{ fontSize: '0.7rem', padding: '0.2rem 0.45rem' }}
+                        >
+                          <Download size={11} /> CSV
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
           )}
         </div>
