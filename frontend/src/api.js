@@ -22,9 +22,14 @@ export async function fetchHealth() {
   try {
     const res = await fetch(`${API_BASE}/health`)
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const contentType = res.headers.get('content-type') || ''
+    if (!contentType.includes('application/json')) {
+      throw new Error(`Expected JSON but received ${contentType || 'HTML (VITE_API_URL may not be set)'}`)
+    }
     return await res.json()
   } catch (err) {
-    return { status: 'offline', error: err.message }
+    console.warn(`[Clean-It API] Health check to "${API_BASE || '(same-origin)'}/health" failed:`, err.message)
+    return { status: 'offline', error: err.message, target: API_BASE || window.location.origin }
   }
 }
 

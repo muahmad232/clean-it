@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { Database, BookOpen, Layers, Home, Sliders, User, LogOut, LogIn, FolderKanban } from 'lucide-react'
-import { fetchHealth } from '../api'
+import { fetchHealth, API_BASE } from '../api'
 
 export default function Navbar({
   activeTab,
@@ -92,7 +92,14 @@ export default function Navbar({
 
         {/* User / Auth Controls */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          <div className="status-pill">
+          <div
+            className="status-pill"
+            title={
+              isOnline
+                ? `Connected to Backend API (${health.version || 'v0.1.0'})`
+                : `Target: ${API_BASE || '(current domain)'}/health — ${health.error || 'Waiting for connection...'}`
+            }
+          >
             <span className={`pulse-dot ${isOnline ? 'online' : 'error'}`} />
             <span>{isOnline ? 'API Ready' : 'Connecting'}</span>
           </div>
