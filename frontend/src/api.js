@@ -3,7 +3,7 @@
  * Interfaces with the FastAPI backend and coordinates with Supabase Auth.
  */
 
-const API_BASE = ''  // Handled by Vite proxy in development or direct host in prod
+export const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '')
 
 export function getAuthHeaders() {
   const headers = {}

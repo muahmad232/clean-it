@@ -32,7 +32,8 @@ export async function getSupabase() {
     // 2. Fallback to backend config endpoint
     if (!url || !anonKey) {
       try {
-        const res = await fetch('/api/v1/auth/config')
+        const apiBase = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '')
+        const res = await fetch(`${apiBase}/api/v1/auth/config`)
         if (res.ok) {
           const data = await res.json()
           url = data.supabase_url

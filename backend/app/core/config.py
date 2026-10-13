@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     environment: str = Field(default="development")
     log_level: str = Field(default="INFO")
     app_version: str = Field(default="0.1.0")
+    cors_origins: str = Field(default="*")
 
     # ── Groq ─────────────────────────────────────────────────────
     groq_api_key: str = Field(default="")

@@ -91,21 +91,27 @@ def create_app() -> FastAPI:
     )
 
     # ── CORS ──────────────────────────────────────────────────────
-    # In development allow all origins; tighten in production.
-    origins = (
-        ["*"]
-        if settings.is_development
-        else [
-            "https://your-frontend.vercel.app",
-        ]
-    )
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=origins,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    # Configurable origins with support for Vercel preview domains and production hosts
+    raw_origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
+    if not raw_origins or "*" in raw_origins or settings.is_development:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origin_regex=r".*",
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+            expose_headers=["*"],
+        )
+    else:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=raw_origins,
+            allow_origin_regex=r"https://.*\.vercel\.app",
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+            expose_headers=["*"],
+        )
 
     # ── Global exception handlers ─────────────────────────────────
     @app.exception_handler(Exception)
