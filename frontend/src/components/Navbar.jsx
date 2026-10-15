@@ -1,6 +1,5 @@
-import React, { useState, useEffect } from 'react'
+import React from 'react'
 import { Database, BookOpen, Layers, Home, Sliders, User, LogOut, LogIn, FolderKanban } from 'lucide-react'
-import { fetchHealth, API_BASE } from '../api'
 
 export default function Navbar({
   activeTab,
@@ -9,23 +8,6 @@ export default function Navbar({
   onOpenAuth,
   onSignOut,
 }) {
-  const [health, setHealth] = useState({ status: 'checking', db_status: 'checking' })
-
-  useEffect(() => {
-    let mounted = true
-    async function check() {
-      const data = await fetchHealth()
-      if (mounted) setHealth(data)
-    }
-    check()
-    const timer = setInterval(check, 15000)
-    return () => {
-      mounted = false
-      clearInterval(timer)
-    }
-  }, [])
-
-  const isOnline = health.status === 'healthy'
 
   return (
     <header className="navbar">
@@ -92,17 +74,6 @@ export default function Navbar({
 
         {/* User / Auth Controls */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          <div
-            className="status-pill"
-            title={
-              isOnline
-                ? `Connected to Backend API (${health.version || 'v0.1.0'})`
-                : `Target: ${API_BASE || '(current domain)'}/health — ${health.error || 'Waiting for connection...'}`
-            }
-          >
-            <span className={`pulse-dot ${isOnline ? 'online' : 'error'}`} />
-            <span>{isOnline ? 'API Ready' : 'Connecting'}</span>
-          </div>
 
           {user ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
